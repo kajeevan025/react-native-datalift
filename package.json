@@ -1,6 +1,6 @@
 {
   "name": "react-native-datalift",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Production-ready document scanner SDK with native OCR, rule-based NLP, and optional AI extraction for React Native",
   "main": "lib/cjs/index.js",
   "module": "lib/esm/index.js",
@@ -93,11 +93,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/datalift/react-native-datalift.git"
+    "url": "https://github.com/kajeevan025/react-native-datalift.git"
   },
-  "homepage": "https://github.com/datalift/react-native-datalift#readme",
+  "homepage": "https://github.com/kajeevan025/react-native-datalift#readme",
   "bugs": {
-    "url": "https://github.com/datalift/react-native-datalift/issues"
+    "url": "https://github.com/kajeevan025/react-native-datalift/issues"
   },
   "engineStrict": true,
   "engines": {
