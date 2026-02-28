@@ -1,0 +1,66 @@
+# Dependencies
+node_modules/
+
+# Build output
+lib/
+dist/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# React Native
+*.xcworkspace
+*.xcuserdata
+build/
+DerivedData/
+Pods/
+
+# Android
+android/.gradle/
+android/build/
+android/app/build/
+*.apk
+*.aab
+local.properties
+
+# iOS
+ios/build/
+ios/Pods/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Testing
+coverage/
+
+# Environment
+.env
+.env.local
+
+# TypeDoc
+docs/
+
+# Test data & models
+DataSet/
+assets/models/
+
+# Example app artifacts
+example/output/
+example/ios/build/
+example/android/build/
+
+# Backup & temp files
+*.backup
+
+# Instructions
+.github/instructions/wmt-copilot.instructions.md

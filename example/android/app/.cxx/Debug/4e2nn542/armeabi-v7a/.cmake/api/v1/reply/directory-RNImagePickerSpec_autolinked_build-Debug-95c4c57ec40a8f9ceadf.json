@@ -1,0 +1,14 @@
+{
+	"backtraceGraph" : 
+	{
+		"commands" : [],
+		"files" : [],
+		"nodes" : []
+	},
+	"installers" : [],
+	"paths" : 
+	{
+		"build" : "RNImagePickerSpec_autolinked_build",
+		"source" : "/Users/jeevanananda/Documents/Plugin/react-native-datalift/example/node_modules/react-native-image-picker/android/build/generated/source/codegen/jni"
+	}
+}

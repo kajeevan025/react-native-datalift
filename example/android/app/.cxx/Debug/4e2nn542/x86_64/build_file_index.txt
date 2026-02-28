@@ -1,0 +1,2 @@
+/Users/jeevanananda/Documents/Plugin/react-native-datalift/example/node_modules/react-native-image-picker/android/build/generated/source/codegen/jni/CMakeLists.txt
+/Users/jeevanananda/Documents/Plugin/react-native-datalift/example/node_modules/react-native/ReactAndroid/cmake-utils/default-app-setup/CMakeLists.txt

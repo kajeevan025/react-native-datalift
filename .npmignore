@@ -1,0 +1,19 @@
+# Test files
+src/__tests__/
+**/*.test.ts
+**/*.test.tsx
+**/*.spec.ts
+**/*.spec.tsx
+
+# Config & dev files
+tsconfig*.json
+jest.config.js
+.eslintrc*
+.prettierrc*
+.github/
+scripts/
+example/
+DataSet/
+
+# Build artefacts
+*.tgz

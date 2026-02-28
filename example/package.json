@@ -1,0 +1,37 @@
+{
+  "name": "datalift-example",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "android": "react-native run-android",
+    "ios": "react-native run-ios",
+    "start": "lsof -ti:8081 | xargs kill -9 2>/dev/null || true && react-native start --reset-cache",
+    "process-dataset": "ts-node TestDataSetProcessor.ts",
+    "test:extraction": "cd .. && npm test -- src/__tests__/DocumentProcessor.test.ts"
+  },
+  "dependencies": {
+    "react": "18.3.1",
+    "react-native": "0.76.5",
+    "react-native-datalift": "file:../",
+    "react-native-image-picker": "^5.4.0"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.25.0",
+    "@babel/preset-env": "^7.25.0",
+    "@babel/runtime": "^7.25.0",
+    "@react-native-community/cli": "^15.0.0",
+    "@react-native/babel-preset": "0.76.5",
+    "@react-native/metro-config": "0.76.5",
+    "@react-native/typescript-config": "0.76.5",
+    "@types/node": "^18.0.0",
+    "@types/react": "^18.3.0",
+    "@types/react-test-renderer": "^18.3.0",
+    "babel-plugin-module-resolver": "^5.0.0",
+    "prettier": "3.3.3",
+    "ts-node": "^10.9.0",
+    "typescript": "5.0.4"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
