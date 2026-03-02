@@ -3,43 +3,78 @@
 #
 # Prepares LayoutLMv3 model assets for distribution via GitHub Releases.
 #
-# What this script does
-# ─────────────────────
-# 1. Downloads microsoft/layoutlmv3-base from HuggingFace (or a fine-tuned fork)
-# 2. Converts to CoreML (.mlpackage) for iOS   → via coremltools
-# 3. Exports int8-quantized ONNX for Android   → via optimum / onnxruntime-tools
-# 4. Downloads/generates labels.json + vocab.json
-# 5. Packages each asset into the release-ready files expected by ModelManager.ts
+# What this script does (full pipeline)
+# ─────────────────────────────────────
+# 1. Fine-tunes microsoft/layoutlmv3-base on invoice/receipt data (CORD dataset)
+#    → scripts/finetune-layoutlmv3.py  →  dist/finetuned/
+# 2. Exports the fine-tuned model to int8 ONNX (Android) + CoreML (iOS)
+#    → scripts/export-layoutlmv3.py   →  dist/models/
+# 3. Final assets in dist/models/ are ready to upload to GitHub Release 'models-v1'
 #
 # Requirements
 # ─────────────────────
 #   Python 3.9+
-#   pip install transformers coremltools optimum onnxruntime torch
+#   pip install transformers torch datasets seqeval coremltools optimum[exporters] onnxruntime
 #   (macOS is required for CoreML conversion)
 #
 # Usage
 # ─────
-#   bash scripts/prepare-model.sh [MODEL_ID] [OUTPUT_DIR]
+#   bash scripts/prepare-model.sh [OPTIONS]
+#
+# Options
+#   --skip-finetune      Skip training; use existing dist/finetuned/ model
+#   --skip-ios           Skip CoreML (iOS) export
+#   --skip-android       Skip ONNX int8 (Android) export
+#   --epochs N           Number of fine-tuning epochs (default: 10)
+#   --base-model ID      HuggingFace model ID to fine-tune (default: microsoft/layoutlmv3-base)
+#   --finetune-dir DIR   Directory to save/load fine-tuned model (default: ./dist/finetuned)
+#   --output-dir DIR     Directory to save release assets (default: ./dist/models)
+#   --custom-data PATH   Path to custom JSON training data (optional)
 #
 # Examples
-#   bash scripts/prepare-model.sh                               # defaults below
-#   bash scripts/prepare-model.sh microsoft/layoutlmv3-base ./dist/models
+#   bash scripts/prepare-model.sh
+#   bash scripts/prepare-model.sh --skip-finetune
+#   bash scripts/prepare-model.sh --epochs 5 --skip-ios
 #
-# After running, upload the files in OUTPUT_DIR as assets to a GitHub Release
-# tagged "models-v1" on https://github.com/kajeevan025/react-native-datalift
+# After running, upload ALL files in OUTPUT_DIR to a GitHub Release tagged 'models-v1'
 
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-MODEL_ID="${1:-microsoft/layoutlmv3-base}"
-OUTPUT_DIR="${2:-${ROOT_DIR}/dist/models}"
+SCRIPTS_DIR="${ROOT_DIR}/scripts"
 PYTHON="${PYTHON:-python3}"
+
+# ── Parse arguments ───────────────────────────────────────────────────────────
+SKIP_FINETUNE=0
+SKIP_IOS=0
+SKIP_ANDROID=0
+EPOCHS=10
+BASE_MODEL="microsoft/layoutlmv3-base"
+FINETUNE_DIR="${ROOT_DIR}/dist/finetuned"
+OUTPUT_DIR="${ROOT_DIR}/dist/models"
+CUSTOM_DATA=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --skip-finetune)  SKIP_FINETUNE=1 ; shift ;;
+    --skip-ios)       SKIP_IOS=1      ; shift ;;
+    --skip-android)   SKIP_ANDROID=1  ; shift ;;
+    --epochs)         EPOCHS="$2"     ; shift 2 ;;
+    --base-model)     BASE_MODEL="$2" ; shift 2 ;;
+    --finetune-dir)   FINETUNE_DIR="$2"; shift 2 ;;
+    --output-dir)     OUTPUT_DIR="$2" ; shift 2 ;;
+    --custom-data)    CUSTOM_DATA="$2"; shift 2 ;;
+    *) echo "[WARN] Unknown option: $1"; shift ;;
+  esac
+done
 
 echo ""
 echo "┌──────────────────────────────────────────────────────────┐"
-echo "│  DataLift – LayoutLMv3 model preparation                 │"
-echo "│  Model  : ${MODEL_ID}"
-echo "│  Output : ${OUTPUT_DIR}"
+echo "│  DataLift – LayoutLMv3 full pipeline                     │"
+echo "│  Base model   : ${BASE_MODEL}"
+echo "│  Finetune dir : ${FINETUNE_DIR}"
+echo "│  Output dir   : ${OUTPUT_DIR}"
+echo "│  Epochs       : ${EPOCHS}"
 echo "└──────────────────────────────────────────────────────────┘"
 echo ""
 
@@ -54,158 +89,95 @@ PYTHON_VERSION=$("$PYTHON" -c "import sys; print(f'{sys.version_info.major}.{sys
 echo "[INFO] Using Python $PYTHON_VERSION at $("$PYTHON" -c "import sys; print(sys.executable)")"
 
 if [[ "$(uname)" != "Darwin" ]]; then
-  echo "[WARN] CoreML conversion is only supported on macOS. The iOS model will be skipped."
+  echo "[WARN] CoreML conversion is only supported on macOS. iOS model will be skipped."
   SKIP_IOS=1
-else
-  SKIP_IOS=0
 fi
 
-mkdir -p "${OUTPUT_DIR}/tmp"
+mkdir -p "${OUTPUT_DIR}"
 
 # ── 1. Install Python dependencies ────────────────────────────────────────────
 
 echo ""
-echo "[1/5] Installing Python dependencies..."
-"$PYTHON" -m pip install --quiet --upgrade \
-  transformers \
-  torch \
-  onnx \
-  onnxruntime \
-  optimum[exporters] \
-  ${SKIP_IOS:-coremltools}
+echo "[1/3] Installing Python dependencies..."
 
-# ── 2. Export to ONNX ─────────────────────────────────────────────────────────
-
-echo ""
-echo "[2/5] Exporting ${MODEL_ID} → ONNX..."
-ONNX_DIR="${OUTPUT_DIR}/tmp/onnx"
-mkdir -p "${ONNX_DIR}"
-
-"$PYTHON" - <<PYEOF
-from optimum.exporters.onnx import main_export
-main_export(
-    model_name_or_path="${MODEL_ID}",
-    output="${ONNX_DIR}",
-    task="token-classification",
-    opset=14,
-)
-print("[optimum] ONNX export complete")
-PYEOF
-
-ONNX_SRC="${ONNX_DIR}/model.onnx"
-if [ ! -f "${ONNX_SRC}" ]; then
-  # Some exporters write to model_optimized.onnx
-  ONNX_SRC=$(find "${ONNX_DIR}" -name "*.onnx" | head -1)
-fi
-
-if [ -z "${ONNX_SRC}" ]; then
-  echo "ERROR: ONNX export produced no .onnx file in ${ONNX_DIR}"
-  exit 1
-fi
-echo "[INFO] ONNX model at: ${ONNX_SRC}"
-
-# ── 3. Quantize ONNX (int8) for Android ──────────────────────────────────────
-
-echo ""
-echo "[3/5] Quantizing ONNX → int8 for Android..."
-ANDROID_MODEL="${OUTPUT_DIR}/layoutlmv3-base-doc-android.onnx"
-
-"$PYTHON" - <<PYEOF
-from onnxruntime.quantization import quantize_dynamic, QuantType
-quantize_dynamic(
-    model_input="${ONNX_SRC}",
-    model_output="${ANDROID_MODEL}",
-    weight_type=QuantType.QInt8,
-)
-print("[onnxruntime] int8 quantization complete → ${ANDROID_MODEL}")
-PYEOF
-
-# ── 4. Convert to CoreML for iOS ──────────────────────────────────────────────
-
+CORE_DEPS="transformers torch datasets seqeval onnx onnxruntime 'optimum[exporters]'"
 if [[ "${SKIP_IOS}" == "0" ]]; then
-  echo ""
-  echo "[4/5] Converting ONNX → CoreML (.mlpackage) for iOS..."
-  IOS_MODEL="${OUTPUT_DIR}/layoutlmv3-base-doc-coreml.mlpackage"
-
-  "$PYTHON" - <<PYEOF
-import coremltools as ct
-import numpy as np
-
-model = ct.convert(
-    "${ONNX_SRC}",
-    convert_to="mlprogram",
-    minimum_deployment_target=ct.target.iOS16,
-    compute_precision=ct.precision.FLOAT16,
-    outputs=[ct.TensorType(name="logits")],
-)
-model.save("${IOS_MODEL}")
-print("[coremltools] CoreML mlpackage saved → ${IOS_MODEL}")
-PYEOF
-
-  # Zip the .mlpackage (it is a directory bundle on disk)
-  echo "[INFO] Zipping CoreML package..."
-  cd "${OUTPUT_DIR}"
-  zip -r "layoutlmv3-base-doc-coreml.mlpackage.zip" \
-    "layoutlmv3-base-doc-coreml.mlpackage" \
-    --quiet
-  cd "${ROOT_DIR}"
-  echo "[INFO] iOS zip: ${OUTPUT_DIR}/layoutlmv3-base-doc-coreml.mlpackage.zip"
-else
-  echo "[4/5] Skipping CoreML conversion (not macOS)"
+  CORE_DEPS="${CORE_DEPS} coremltools"
 fi
 
-# ── 5. Export labels.json + vocab.json ────────────────────────────────────────
+"$PYTHON" -m pip install --quiet --upgrade ${CORE_DEPS}
+echo "      Dependencies installed."
+
+# ── 2. Fine-tune ──────────────────────────────────────────────────────────────
+
+if [[ "${SKIP_FINETUNE}" == "1" ]]; then
+  echo ""
+  echo "[2/3] Skipping fine-tuning (--skip-finetune) — using: ${FINETUNE_DIR}"
+  if [[ ! -d "${FINETUNE_DIR}" ]]; then
+    echo "ERROR: --skip-finetune specified but ${FINETUNE_DIR} does not exist."
+    echo "       Run without --skip-finetune first to train the model."
+    exit 1
+  fi
+else
+  echo ""
+  echo "[2/3] Fine-tuning LayoutLMv3 on invoice/receipt data..."
+  echo "      This may take 30-90 minutes on a GPU-equipped machine."
+  echo ""
+
+  FINETUNE_ARGS=(
+    "$SCRIPTS_DIR/finetune-layoutlmv3.py"
+    "--base-model" "${BASE_MODEL}"
+    "--output-dir" "${FINETUNE_DIR}"
+    "--epochs" "${EPOCHS}"
+  )
+  if [[ -n "${CUSTOM_DATA}" ]]; then
+    FINETUNE_ARGS+=("--custom-data" "${CUSTOM_DATA}")
+  fi
+
+  "$PYTHON" "${FINETUNE_ARGS[@]}"
+  echo ""
+  echo "[INFO] Fine-tuned model saved to: ${FINETUNE_DIR}"
+fi
+
+# ── 3. Export models ──────────────────────────────────────────────────────────
 
 echo ""
-echo "[5/5] Exporting labels.json and vocab.json..."
+echo "[3/3] Exporting model assets for iOS + Android..."
 
-"$PYTHON" - <<PYEOF
-import json, os
-from transformers import AutoTokenizer, AutoConfig
+EXPORT_ARGS=(
+  "$SCRIPTS_DIR/export-layoutlmv3.py"
+  "--model-dir"  "${FINETUNE_DIR}"
+  "--output-dir" "${OUTPUT_DIR}"
+)
+if [[ "${SKIP_IOS}" == "1" ]];     then EXPORT_ARGS+=("--skip-ios");     fi
+if [[ "${SKIP_ANDROID}" == "1" ]]; then EXPORT_ARGS+=("--skip-android"); fi
 
-cfg = AutoConfig.from_pretrained("${MODEL_ID}")
-tok = AutoTokenizer.from_pretrained("${MODEL_ID}")
-
-# labels.json  – id → label string mapping
-id2label = cfg.id2label if hasattr(cfg, "id2label") and cfg.id2label else {
-    "0": "O",
-    "1": "B-HEADER", "2": "I-HEADER",
-    "3": "B-QUESTION", "4": "I-QUESTION",
-    "5": "B-ANSWER", "6": "I-ANSWER",
-}
-# Cast keys to ints for consistent ordering
-id2label = {str(k): v for k, v in id2label.items()}
-
-labels_path = os.path.join("${OUTPUT_DIR}", "labels.json")
-with open(labels_path, "w") as f:
-    json.dump(id2label, f, indent=2)
-print(f"[labels] {len(id2label)} labels → {labels_path}")
-
-# vocab.json  – token → id mapping (subset of full HF tokenizer)
-vocab = tok.get_vocab()
-vocab_path = os.path.join("${OUTPUT_DIR}", "vocab.json")
-with open(vocab_path, "w") as f:
-    json.dump(vocab, f)
-print(f"[vocab] {len(vocab)} tokens → {vocab_path}")
-PYEOF
+"$PYTHON" "${EXPORT_ARGS[@]}"
 
 # ── Summary ───────────────────────────────────────────────────────────────────
 
 echo ""
 echo "┌──────────────────────────────────────────────────────────────────┐"
-echo "│  Prepared model assets                                           │"
+echo "│  Release assets ready                                            │"
 echo "├──────────────────────────────────────────────────────────────────┤"
-ls -lh "${OUTPUT_DIR}"/*.onnx "${OUTPUT_DIR}"/*.zip "${OUTPUT_DIR}"/*.json 2>/dev/null | \
-  awk '{printf "│  %-60s  │\n", $NF " (" $5 ")"}' || true
+find "${OUTPUT_DIR}" -maxdepth 1 -type f | sort | while read -r fp; do
+  fname=$(basename "$fp")
+  size=$(du -sh "$fp" 2>/dev/null | cut -f1)
+  printf "│  %-50s %8s  │\n" "${fname}" "${size}"
+done
 echo "└──────────────────────────────────────────────────────────────────┘"
 echo ""
 echo "Next steps:"
 echo "  1. Go to https://github.com/kajeevan025/react-native-datalift/releases"
-echo "  2. Create a new release tagged 'models-v1'"
+echo "  2. Create (or edit) release tagged 'models-v1'"
 echo "  3. Upload ALL files from: ${OUTPUT_DIR}/"
-echo "     • layoutlmv3-base-doc-android.onnx"
-echo "     • layoutlmv3-base-doc-coreml.mlpackage.zip   (macOS only)"
-echo "     • labels.json"
-echo "     • vocab.json"
+echo "       • layoutlmv3-base-doc-android.onnx"
+echo "       • layoutlmv3-base-doc-coreml.mlpackage.zip   (iOS)"
+echo "       • labels.json"
+echo "       • vocab.json"
 echo ""
-echo "[DataLift] Done. Users can now call DataLift.prepareModel({ autoDownload: true })"
+echo "  4. In your React Native app:"
+echo "       DataLift.configure({ autoDownloadLayoutLMv3: true });"
+echo "       await DataLift.prepareModel();"
+echo ""
+echo "[DataLift] Pipeline complete."
