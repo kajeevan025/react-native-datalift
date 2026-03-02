@@ -1243,7 +1243,7 @@ PODS:
     - ReactCommon/turbomodule/bridging
     - ReactCommon/turbomodule/core
     - Yoga
-  - react-native-datalift (1.1.0):
+  - react-native-datalift (1.2.1):
     - React-Core
   - react-native-image-picker (5.7.0):
     - RCT-Folly
@@ -1767,7 +1767,7 @@ SPEC CHECKSUMS:
   React-logger: ae95f0effa7e1791bd6f7283caddca323d4fbc1e
   React-Mapbuffer: 7eb5d69e1154e7743487ef0c8d7261e5b59afb32
   React-microtasksnativemodule: 01dd998649ff5f8814846b7eee84c4d57f5d3671
-  react-native-datalift: 3c2cfd021d62ddfceccbf39255e7a4f12ccef15f
+  react-native-datalift: 3f58a53cb49e1392274279ea235df0b21c2ef650
   react-native-image-picker: c400108a3378c35793171241475de99569a6d277
   React-nativeconfig: f7ab6c152e780b99a8c17448f2d99cf5f69a2311
   React-NativeModulesApple: 9aeb901b9bfcc9235e912445fb3cf4780a99baf4

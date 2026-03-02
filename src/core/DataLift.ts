@@ -1,4 +1,3 @@
-
 /**
  * DataLift – Main extraction API
  *
@@ -13,7 +12,7 @@
  * Advanced usage:
  *   DataLift.configure({
  *     aiConfidenceThreshold: 0.7,
- *     aiProvider: new OpenAIProvider({ apiKey: "sk-..." }),
+ *     aiProvider: new HuggingFaceProvider({ runner: myLayoutLMv3Runner }),
  *     ocrProvider: new TesseractOCR(),
  *   });
  */

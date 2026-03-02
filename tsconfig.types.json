@@ -5,7 +5,7 @@
     "outDir": "./lib/types",
     "declarationDir": "./lib/types",
     "declaration": true,
-    "declarationMap": true,
+    "declarationMap": false,
     "emitDeclarationOnly": true,
     "sourceMap": false
   },

@@ -58,37 +58,37 @@ export const PATTERNS = {
   // International phone: handles +61 3 9000 1234, (03) 9000-1234, +1 800 555 0100
   // Use [ \t] instead of \s to prevent matching across newlines (e.g. zip\narea-code)
   PHONE:
-    /(?:\+\d{1,3}[ \t\-.]?)(?:\(?\d{1,4}\)?[ \t\-.]){1,4}\d{2,6}|(?:\(?\d{2,4}\)?[ \t\-.]?\d{3,4}[ \t\-.]?\d{3,4})/g,
+    /(?:\+\d{1,3}[ \t\-.]?)(?:\(?\d{1,4}\)?[ \t\-.]){1,4}\d{2,6}|(?:\(?\d{2,4}\)?[ \t\-.]?\d{3,4}[ \t\-.]?\d{3,4})/,
 
   // Emails
-  EMAIL: /[\w.+\-]+@[\w\-]+\.[\w.]{2,}/gi,
+  EMAIL: /[\w.+\-]+@[\w\-]+\.[\w.]{2,}/i,
 
   // URLs
-  URL: /https?:\/\/[^\s]+|www\.[^\s]+/gi,
+  URL: /https?:\/\/[^\s]+|www\.[^\s]+/i,
 
   // ISO date YYYY-MM-DD
-  DATE_ISO: /\b(\d{4}[-/]\d{2}[-/]\d{2})\b/g,
+  DATE_ISO: /\b(\d{4}[-/]\d{2}[-/]\d{2})\b/,
 
   // DD/MM/YYYY or DD-MM-YYYY (common AU/EU format)
-  DATE_DMY: /\b(\d{1,2}[-/.]\d{1,2}[-/.]\d{4})\b/g,
+  DATE_DMY: /\b(\d{1,2}[-/.]\d{1,2}[-/.]\d{4})\b/,
 
   // MM/DD/YYYY (US)
-  DATE_MDY: /\b(\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4})\b/g,
+  DATE_MDY: /\b(\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4})\b/,
 
   // Long date: 18 February 2025, Feb 18 2025, February 18, 2025
   DATE_LONG:
-    /\b(\d{1,2})\s+(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+(\d{4})\b/gi,
+    /\b(\d{1,2})\s+(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+(\d{4})\b/i,
   DATE_LONG_REV:
-    /\b(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+(\d{1,2}),?\s+(\d{4})\b/gi,
+    /\b(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+(\d{1,2}),?\s+(\d{4})\b/i,
 
   // Monetary amounts
   AMOUNT:
     /(?:[\$€£₹¥]|AUD|USD|EUR|GBP|INR)?\s*(\d{1,3}(?:[,\s]\d{3})*(?:\.\d{1,4})?)/,
-  AMOUNT_BARE: /\b(\d{1,3}(?:,\d{3})*\.\d{2})\b/g,
+  AMOUNT_BARE: /\b(\d{1,3}(?:,\d{3})*\.\d{2})\b/,
 
   // Australian Business Number: 51 824 753 556 or 51824753556
   ABN: /\bABN[\s:#.]*(\d{2}\s?\d{3}\s?\d{3}\s?\d{3})\b/i,
-  ABN_BARE: /\b(\d{2}\s\d{3}\s\d{3}\s\d{3})\b/g,
+  ABN_BARE: /\b(\d{2}\s\d{3}\s\d{3}\s\d{3})\b/,
 
   // Australian Company Number
   ACN: /\bACN[\s:#.]*(\d{3}\s?\d{3}\s?\d{3})\b/i,
@@ -292,7 +292,9 @@ export function extractDates(text: string): {
 // ─── Phone / Email / URL ──────────────────────────────────────────────────────
 
 export function extractPhones(text: string): string[] {
-  const found = text.match(PATTERNS.PHONE) ?? [];
+  const found = [...text.matchAll(new RegExp(PATTERNS.PHONE, "g"))].map(
+    (m) => m[0],
+  );
   return Array.from(
     new Set(
       found
@@ -305,12 +307,16 @@ export function extractPhones(text: string): string[] {
 }
 
 export function extractEmails(text: string): string[] {
-  const found = text.match(PATTERNS.EMAIL) ?? [];
+  const found = [...text.matchAll(new RegExp(PATTERNS.EMAIL, "gi"))].map(
+    (m) => m[0],
+  );
   return Array.from(new Set(found.map((e) => e.toLowerCase())));
 }
 
 export function extractURLs(text: string): string[] {
-  const found = text.match(PATTERNS.URL) ?? [];
+  const found = [...text.matchAll(new RegExp(PATTERNS.URL, "gi"))].map(
+    (m) => m[0],
+  );
   return Array.from(new Set(found.map((u) => u.trim())));
 }
 

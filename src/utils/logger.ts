@@ -1,4 +1,3 @@
-
 /**
  * DataLift – Lightweight, zero-dependency logger
  *
@@ -47,10 +46,12 @@ export function createLogger(enabled: boolean = false): DataLiftLogger {
       console.info(fmt("info", message), ...args);
     },
     warn(message: string, ...args: unknown[]): void {
+      if (!enabled) return;
       // eslint-disable-next-line no-console
       console.warn(fmt("warn", message), ...args);
     },
     error(message: string, ...args: unknown[]): void {
+      if (!enabled) return;
       // eslint-disable-next-line no-console
       console.error(fmt("error", message), ...args);
     },

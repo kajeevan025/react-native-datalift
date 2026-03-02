@@ -15,5 +15,12 @@ scripts/
 example/
 DataSet/
 
+# Source maps & declaration maps (not needed by consumers)
+**/*.js.map
+**/*.d.ts.map
+
+# Source code (compiled output in lib/ is shipped instead)
+src/
+
 # Build artefacts
 *.tgz

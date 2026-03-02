@@ -1,6 +1,6 @@
 {
   "name": "react-native-datalift",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Production-ready document scanner SDK with native OCR, rule-based NLP, and optional AI extraction for React Native",
   "main": "lib/cjs/index.js",
   "module": "lib/esm/index.js",
@@ -12,6 +12,10 @@
       "types": "./lib/types/index.d.ts"
     }
   },
+  "sideEffects": [
+    "./lib/cjs/ocr/OCREngine.js",
+    "./lib/esm/ocr/OCREngine.js"
+  ],
   "files": [
     "lib/",
     "android/",

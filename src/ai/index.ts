@@ -1,6 +1,4 @@
-
 export { AIEngine, registerAIProvider, getAIProvider } from "./AIEngine";
-export { OpenAIProvider } from "./OpenAIProvider";
 export { HuggingFaceProvider } from "./HuggingFaceProvider";
 export type {
   AIProvider,
@@ -8,7 +6,6 @@ export type {
   AIEnhancementResult,
 } from "./AIProvider";
 export { AIProviderError } from "./AIProvider";
-export type { OpenAIProviderConfig } from "./OpenAIProvider";
 export type {
   HuggingFaceProviderConfig,
   LayoutLMv3InferenceInput,

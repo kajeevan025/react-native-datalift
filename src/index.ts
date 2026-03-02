@@ -1,4 +1,3 @@
-
 /**
  * DataLift - React Native Document Scanner & Structured Extraction SDK
  *
@@ -8,7 +7,7 @@
  * @packageDocumentation
  */
 
-// ─── New production SDK (primary API) ─────────────────────────────────────────
+// ─── Core extraction API ──────────────────────────────────────────────────────
 export { DataLiftSDK as DataLift } from "./core/DataLift";
 export type {
   DataLiftConfigureOptions,
@@ -43,14 +42,12 @@ export type { OCRProvider, OCROptions, OCRResult } from "./ocr";
 
 // AI layer
 export { AIEngine, registerAIProvider, getAIProvider } from "./ai";
-export { OpenAIProvider } from "./ai";
 export { HuggingFaceProvider } from "./ai";
 export { AIProviderError } from "./ai";
 export type {
   AIProvider,
   AIEnhancementRequest,
   AIEnhancementResult,
-  OpenAIProviderConfig,
   HuggingFaceProviderConfig,
   LayoutLMv3InferenceInput,
   LayoutLMv3InferenceResult,
@@ -78,56 +75,9 @@ export type { ValidationResult, DataLiftErrorCode } from "./core";
 export { createLogger, silentLogger } from "./utils/logger";
 export type { DataLiftLogger, LogLevel } from "./utils/logger";
 
-// ─── Legacy / native-bridge exports (backward compatibility) ──────────────────
-// Native module — availability flag (safe to check before native is linked)
+// Native module bridge
 export {
   DataLift as DataLiftNative,
   isDataLiftAvailable,
 } from "./NativeDataLift";
 export type { DataLiftNativeInterface } from "./NativeDataLift";
-
-// UI Component
-export { DataLiftScanner, DocumentScanner } from "./components/DocumentScanner";
-export type { DataLiftScannerProps } from "./components/DocumentScanner";
-
-// Custom Hook
-export { useDataLift } from "./hooks";
-export type { UseDataLiftOptions, UseDataLiftResult } from "./hooks";
-
-// Core processor
-export { DocumentProcessor } from "./utils/DocumentProcessor";
-export type { DocumentProcessorOptions } from "./utils/DocumentProcessor";
-
-// Types & Enums
-export {
-  DocumentType,
-  ImageQuality,
-  ImageOrientation,
-  DataLiftError,
-} from "./types";
-
-// Interfaces
-export type {
-  DocumentScanResult,
-  StructuredData,
-  EnhancedStructuredData,
-  Address,
-  PartyInfo,
-  ShippingInfo,
-  PaymentInfo,
-  TaxDetail,
-  EnhancedLineItem,
-  ReceiptItem,
-  Party,
-  InvoiceItem,
-  DocumentSection,
-  DocumentTable,
-  FormField,
-  DocumentMetadata,
-  ImageProcessingOptions,
-  PDFProcessingOptions,
-  ClassificationResult,
-  CameraCaptureOptions,
-  // Backward-compatible alias for DataLiftScannerProps
-  DocumentScannerProps,
-} from "./types";

@@ -1,4 +1,3 @@
-
 /**
  * DataLift – OCR Engine
  *
@@ -17,10 +16,15 @@ import { TesseractOCR } from "./TesseractOCR";
 // ─── Registry ────────────────────────────────────────────────────────────────
 
 const _registry = new Map<string, OCRProvider>();
+let _builtInsRegistered = false;
 
-// Register built-in providers
-_registry.set("native-mlkit", new NativeMLKitOCR());
-_registry.set("tesseract", new TesseractOCR());
+/** Lazily register built-in providers on first access. */
+function ensureBuiltIns(): void {
+  if (_builtInsRegistered) return;
+  _builtInsRegistered = true;
+  _registry.set("native-mlkit", new NativeMLKitOCR());
+  _registry.set("tesseract", new TesseractOCR());
+}
 
 /** Default provider resolution order */
 const DEFAULT_PROVIDER_ORDER = ["native-mlkit", "tesseract"];
@@ -32,6 +36,7 @@ const DEFAULT_PROVIDER_ORDER = ["native-mlkit", "tesseract"];
  * It will be placed at the front of the fallback chain.
  */
 export function registerOCRProvider(provider: OCRProvider): void {
+  ensureBuiltIns();
   _registry.set(provider.name, provider);
 }
 
@@ -39,6 +44,7 @@ export function registerOCRProvider(provider: OCRProvider): void {
  * Retrieve a registered provider by name.
  */
 export function getOCRProvider(name: string): OCRProvider | undefined {
+  ensureBuiltIns();
   return _registry.get(name);
 }
 
@@ -58,6 +64,7 @@ export class OCREngine {
    * Falls back to the next provider if the preferred one is unavailable.
    */
   async run(options: OCROptions): Promise<OCRResult> {
+    ensureBuiltIns();
     const order = this.buildProviderOrder();
 
     let lastError: Error = new OCRError(
