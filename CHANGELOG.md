@@ -5,6 +5,35 @@ All notable changes to `react-native-datalift` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.2] — 2026-03-10
+
+### Fixed — Parser quality
+
+- **Number regex hardening** — replaced `\d{1,3}(?:,\d{3})*` with `(?:\d{1,3}(?:,\d{3})+|\d{1,9})` so 5-digit values (ZIP codes, policy numbers) are no longer split into fake quantity/price pairs
+- **Non-product line filter** — added `NON_PRODUCT_LINE_RX` + `isNonProductLine()` guard in `primitives.ts`; filters out address blocks, phone numbers, email lines, and header/footer text before line-item extraction
+- **Scan-all-lines fallback tightened** — now requires at least one price-like decimal (e.g. `12.34`) before yielding a candidate line item; prevents addresses/policies from leaking into `parts[]`
+
+### Fixed — LayoutLMv3 model path resolution
+
+- **iOS `DataLiftModule.swift`** — `filePathFromUri` returns `String?` (was non-optional); bare filename → `nil` instead of being passed as a path; `resolveBundlePath` now tries `.mlmodelc` then `.mlpackage` in the main bundle before falling back to the raw name; `configureLayoutLMv3` emits actionable error messages with placement instructions
+- **Android `DataLiftModule.kt`** — `filePathFromUri` returns `String?` (was non-optional); bare filename → `null`; `resolveBundlePath` copies the asset from APK `assets/` to `filesDir` on first use so ONNX Runtime can open it; improved error messages
+- **`DataLift.ts`** — `_layoutLMv3Config` now tracks a `configured: boolean`; `extract()` step 4 (LayoutLMv3) is skipped unless `configured === true` (or a verified absolute path is passed); `isLayoutLMv3Configured()` exported for runtime checks
+
+### Changed — Example app
+
+- `App.tsx` tracks `modelConfigured` state; passes `layoutLMv3ModelPath` to `extract()` only when the model was successfully configured
+
+### Removed — Example app
+
+- Dangling `process-dataset` and `test:extraction` scripts from `example/package.json` (referenced deleted files `TestDataSetProcessor.ts` and `DocumentProcessor.test.ts`)
+- `ts-node` devDependency from `example/package.json` (not needed after script removal)
+
+### Documentation
+
+- README fully rewritten: removed stale OpenAI, `useDataLift`, `DocumentScanner` sections; corrected `DataLiftExtractOptions` fields (`aiConfidenceThreshold`, new `layoutLMv3*` fields); corrected `DataLiftResponse` schema (`metadata.confidenceScore`, `metadata.warnings`, `metadata.aiProviderUsed`); added LayoutLMv3 model bundling guide (iOS `.mlmodelc`, Android `assets/`); updated architecture diagram to include step 4 (LayoutLMv3)
+
+---
+
 ## [1.2.1] — 2026-03-02
 
 ### Changed
