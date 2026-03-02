@@ -5,6 +5,29 @@ All notable changes to `react-native-datalift` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.3] — 2026-03-02
+
+### Changed
+
+- **Package renamed to `@kajeevan025/react-native-datalift`** — scoped under the GitHub owner so the package appears in the repository's **Packages** tab on GitHub
+  - Install: `yarn add @kajeevan025/react-native-datalift`
+  - `publishConfig` in `package.json` now points to `https://npm.pkg.github.com` by default; use `yarn publish:npm` to push to the public npm registry
+- `keywords` cleaned — removed stale `"openai"` entry (OpenAI provider was removed in 1.2.1), added `"layoutlmv3"`
+- Minor whitespace normalisation in `src/core/DataLift.ts` (formatter-only, no logic change)
+
+### Added
+
+- **GitHub Actions CI** (`.github/workflows/ci.yml`) — runs typecheck, tests with coverage, and build on every push/PR against `main`, across Node 18 and 20
+- **GitHub Actions Publish** (`.github/workflows/publish.yml`) — on every `v*.*.*` tag push, automatically publishes to both npm (`NPM_TOKEN` secret) and GitHub Packages (`GITHUB_TOKEN`; no secret needed)
+
+### Documentation
+
+- README install command updated: `yarn add @kajeevan025/react-native-datalift`
+- All code-block imports updated to use the scoped package name
+- npm badge URLs updated to point to `@kajeevan025/react-native-datalift`
+
+---
+
 ## [1.2.2] — 2026-03-10
 
 ### Fixed — Parser quality

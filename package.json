@@ -1,6 +1,6 @@
 {
-  "name": "react-native-datalift",
-  "version": "1.2.2",
+  "name": "@kajeevan025/react-native-datalift",
+  "version": "1.2.3",
   "description": "Production-ready document scanner SDK with native OCR, rule-based NLP, and optional AI extraction for React Native",
   "main": "lib/cjs/index.js",
   "module": "lib/esm/index.js",
@@ -40,7 +40,8 @@
     "lint": "eslint 'src/**/*.{ts,tsx}'",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf lib/",
-    "publish:npm": "yarn build && yarn publish --access public",
+    "publish:github": "npm publish",
+    "publish:npm": "npm publish --registry https://registry.npmjs.org --access public",
     "example:android": "cd example && react-native run-android",
     "example:ios": "cd example && react-native run-ios",
     "prepublishOnly": "yarn build"
@@ -86,11 +87,11 @@
     "datalift",
     "vision",
     "ml-kit",
+    "layoutlmv3",
     "mobile",
     "nlp",
     "structured-extraction",
     "ai",
-    "openai",
     "tesseract"
   ],
   "author": "DataLift",
@@ -106,6 +107,10 @@
   "engineStrict": true,
   "engines": {
     "node": ">=18.0.0"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com",
+    "access": "public"
   },
   "packageManager": "yarn@1.22.22"
 }

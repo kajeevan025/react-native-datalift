@@ -4,8 +4,8 @@
 
 **DataLift** accepts images (Base64 or file URI), runs a unified **3-stage pipeline** — native OCR → rule-based NLP parser → optional on-device LayoutLMv3 enhancement — and returns a richly-typed [`DataLiftResponse`](#dataliftresponse-schema) object from a single `await DataLift.extract(...)` call.
 
-[![npm version](https://img.shields.io/npm/v/react-native-datalift)](https://www.npmjs.com/package/react-native-datalift)
-[![license](https://img.shields.io/npm/l/react-native-datalift)](LICENSE)
+[![npm version](https://img.shields.io/npm/v/@kajeevan025/react-native-datalift)](https://www.npmjs.com/package/@kajeevan025/react-native-datalift)
+[![license](https://img.shields.io/npm/l/@kajeevan025/react-native-datalift)](LICENSE)
 
 ## Features
 
@@ -24,7 +24,7 @@
 ## Installation
 
 ```sh
-yarn add react-native-datalift
+yarn add @kajeevan025/react-native-datalift
 ```
 
 ### iOS
@@ -56,18 +56,18 @@ Add to `android/app/src/main/AndroidManifest.xml`:
 ## Quick Start
 
 ```typescript
-import { DataLift } from "react-native-datalift";
+import { DataLift } from "@kajeevan025/react-native-datalift";
 
 // Basic extraction — OCR + rule-based parser
 const result = await DataLift.extract({
   image: "file:///path/to/document.jpg",
 });
 
-console.log(result.supplier.name);              // "ACME Corp"
-console.log(result.transaction.invoiceNumber);  // "INV-2024-0042"
-console.log(result.totals.grandTotal);          // 1234.56
-console.log(result.metadata.confidenceScore);   // 0.87
-console.log(result.parts.length);               // 5  (line items)
+console.log(result.supplier.name); // "ACME Corp"
+console.log(result.transaction.invoiceNumber); // "INV-2024-0042"
+console.log(result.totals.grandTotal); // 1234.56
+console.log(result.metadata.confidenceScore); // 0.87
+console.log(result.parts.length); // 5  (line items)
 ```
 
 ---
@@ -93,8 +93,15 @@ interface DataLiftExtractOptions {
   image?: string;
 
   /** Hint for document type — auto-detected if omitted */
-  documentType?: "invoice" | "receipt" | "purchase_order" | "work_order"
-                | "bill" | "quote" | "cmms" | "generic";
+  documentType?:
+    | "invoice"
+    | "receipt"
+    | "purchase_order"
+    | "work_order"
+    | "bill"
+    | "quote"
+    | "cmms"
+    | "generic";
 
   /** BCP-47 language code hint for OCR — default "en" */
   language?: string;
@@ -131,12 +138,12 @@ interface DataLiftExtractOptions {
 ```typescript
 interface DataLiftResponse {
   metadata: {
-    documentType: DataLiftDocumentType;   // "invoice" | "receipt" | ...
-    confidenceScore: number;              // 0–1 composite score
-    ocrProvider: string;                  // which OCR engine was used
-    aiProviderUsed?: string;              // which AI provider ran (if any)
+    documentType: DataLiftDocumentType; // "invoice" | "receipt" | ...
+    confidenceScore: number; // 0–1 composite score
+    ocrProvider: string; // which OCR engine was used
+    aiProviderUsed?: string; // which AI provider ran (if any)
     processingTimeMs: number;
-    warnings: string[];                   // non-fatal issues from any stage
+    warnings: string[]; // non-fatal issues from any stage
   };
 
   supplier: {
@@ -215,16 +222,20 @@ interface DataLiftResponse {
 
 DATALIFT uses a **fallback chain** — tries each provider in order, uses first that succeeds.
 
-| Priority | Provider                     | ID               | Notes                   |
-| -------- | ---------------------------- | ---------------- | ----------------------- |
+| Priority | Provider                     | ID               | Notes                       |
+| -------- | ---------------------------- | ---------------- | --------------------------- |
 | 1        | Native ML Kit / Apple Vision | `"native-mlkit"` | Built-in with native module |
-| 2        | Tesseract.js (offline)       | `"tesseract"`    | `yarn add tesseract.js` |
+| 2        | Tesseract.js (offline)       | `"tesseract"`    | `yarn add tesseract.js`     |
 
 ### Register a custom OCR provider
 
 ```typescript
-import type { OCRProvider, OCROptions, OCRResult } from "react-native-datalift";
-import { registerOCRProvider } from "react-native-datalift";
+import type {
+  OCRProvider,
+  OCROptions,
+  OCRResult,
+} from "@kajeevan025/react-native-datalift";
+import { registerOCRProvider } from "@kajeevan025/react-native-datalift";
 
 const myProvider: OCRProvider = {
   name: "my-ocr",
@@ -252,10 +263,10 @@ LayoutLMv3 is an optional **stage 4** that fills in fields the rule-based parser
 
 ### Step 1 — Prepare your model
 
-| Platform | Format | How to create |
-|----------|--------|---------------|
-| iOS | `.mlmodelc` (compiled CoreML) | `coremltools.convert()` from a LayoutLMv3 ONNX export |
-| Android | `.onnx` | Fine-tune and export with `transformers` + `optimum` |
+| Platform | Format                        | How to create                                         |
+| -------- | ----------------------------- | ----------------------------------------------------- |
+| iOS      | `.mlmodelc` (compiled CoreML) | `coremltools.convert()` from a LayoutLMv3 ONNX export |
+| Android  | `.onnx`                       | Fine-tune and export with `transformers` + `optimum`  |
 
 > **Note**: DataLift expects a **token-classification** fine-tuned model. Labels must include `O` plus B-/I- tags for fields like `INVOICE_NUMBER`, `DATE`, `VENDOR_NAME`, `GRAND_TOTAL`.
 
@@ -274,13 +285,13 @@ yarn model:layoutlmv3:download
 ### Step 3 — Configure and use
 
 ```typescript
-import { DataLift } from "react-native-datalift";
+import { DataLift } from "@kajeevan025/react-native-datalift";
 
 // Call once at app startup (resolves and validates the model path)
 const configured = await DataLift.configureLayoutLMv3({
-  modelPath: "layoutlmv3_invoice.mlmodelc",  // bare name resolved from bundle
+  modelPath: "layoutlmv3_invoice.mlmodelc", // bare name resolved from bundle
   labelsPath: "layoutlmv3_labels.txt",
-}).catch(() => null);  // fails gracefully if model not bundled
+}).catch(() => null); // fails gracefully if model not bundled
 
 // Check if model is ready
 if (DataLift.isLayoutLMv3Configured()) {
@@ -299,16 +310,20 @@ const compat = await DataLift.checkLayoutLMv3Compatibility({
   labelsPath: "layoutlmv3_labels.txt",
 });
 
-console.log(compat.compatible);      // true / false
-console.log(compat.runtime);         // "coreml-ios" | "onnx-android"
-console.log(compat.checks);          // { model_file, labels_file, label_map, inference }
+console.log(compat.compatible); // true / false
+console.log(compat.runtime); // "coreml-ios" | "onnx-android"
+console.log(compat.checks); // { model_file, labels_file, label_map, inference }
 ```
 
 ### Custom LayoutLMv3 runner (advanced)
 
 ```typescript
-import { DataLift, HuggingFaceProvider, registerAIProvider } from "react-native-datalift";
-import type { LayoutLMv3OfflineRunner } from "react-native-datalift";
+import {
+  DataLift,
+  HuggingFaceProvider,
+  registerAIProvider,
+} from "@kajeevan025/react-native-datalift";
+import type { LayoutLMv3OfflineRunner } from "@kajeevan025/react-native-datalift";
 
 const runner: LayoutLMv3OfflineRunner = async (input) => {
   // Call your own CoreML / ONNX inference here
@@ -328,7 +343,10 @@ registerAIProvider(
 AI runs **only when rule-based confidence falls below `aiConfidenceThreshold`** (default `0.65`). Completely optional and non-fatal — if AI fails, the rule-based result is returned unchanged.
 
 ```typescript
-import { DataLift, HuggingFaceProvider } from "react-native-datalift";
+import {
+  DataLift,
+  HuggingFaceProvider,
+} from "@kajeevan025/react-native-datalift";
 
 DataLift.configure({
   aiProvider: new HuggingFaceProvider({ model: "my-model", runner }),
@@ -345,10 +363,10 @@ const result = await DataLift.extract({ image: base64 });
 Call once at app startup before any `extract()` calls:
 
 ```typescript
-import { DataLift } from "react-native-datalift";
+import { DataLift } from "@kajeevan025/react-native-datalift";
 
 DataLift.configure({
-  aiConfidenceThreshold: 0.7,  // default 0.65
+  aiConfidenceThreshold: 0.7, // default 0.65
   language: "en",
   extractRawText: false,
 });
@@ -376,13 +394,13 @@ const ready = DataLift.isLayoutLMv3Configured();
 
 Each `metadata.confidenceScore` (0–1) is a weighted composite of 5 factors:
 
-| Factor                  | Weight | Description                             |
-| ----------------------- | ------ | --------------------------------------- |
-| OCR Quality             | 15 %   | OCR engine's raw confidence              |
-| Field Population        | 35 %   | Ratio of non-empty required fields       |
+| Factor                  | Weight | Description                                 |
+| ----------------------- | ------ | ------------------------------------------- |
+| OCR Quality             | 15 %   | OCR engine's raw confidence                 |
+| Field Population        | 35 %   | Ratio of non-empty required fields          |
 | Numeric Consistency     | 20 %   | Line-item totals reconcile with grand total |
-| Document Type Certainty | 15 %   | Uniqueness of document-type signal       |
-| Keyword Match           | 15 %   | Presence of expected document keywords   |
+| Document Type Certainty | 15 %   | Uniqueness of document-type signal          |
+| Keyword Match           | 15 %   | Presence of expected document keywords      |
 
 When LayoutLMv3 runs and fills gaps, confidence is **re-scored** and the higher of the two scores is kept.
 

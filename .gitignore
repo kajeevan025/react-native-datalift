@@ -1,6 +1,9 @@
 # Dependencies
 node_modules/
 
+# Yarn
+.yarn/releases
+
 # Build output
 lib/
 dist/

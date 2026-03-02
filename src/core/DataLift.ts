@@ -301,7 +301,8 @@ export const DataLiftSDK = {
     //   b) caller passed an absolute (already-resolved) model path in options
     const explicitModelPath = options.layoutLMv3ModelPath;
     const hasValidExplicitPath =
-      typeof explicitModelPath === "string" && explicitModelPath.startsWith("/");
+      typeof explicitModelPath === "string" &&
+      explicitModelPath.startsWith("/");
     const layoutModelPath = hasValidExplicitPath
       ? explicitModelPath
       : _layoutLMv3Config.configured
