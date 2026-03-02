@@ -83,6 +83,23 @@ export interface DataLiftNativeInterface {
     warnings?: string[];
     error?: string;
   }>;
+
+  /**
+   * Returns the platform-specific directory where downloaded model files are stored.
+   * iOS:     Library/Application Support/DataLift/models/layoutlmv3/
+   * Android: <filesDir>/DataLift/models/layoutlmv3/
+   */
+  getModelStorageDir(): Promise<{ path: string }>;
+
+  /**
+   * Download a remote file to a local destination path using a native
+   * streaming HTTP request (URLSession on iOS / HttpURLConnection on Android).
+   * Suitable for large model files without loading them into JS memory.
+   */
+  downloadModelFile(options: {
+    url: string;
+    destination: string;
+  }): Promise<{ path: string; bytes: number }>;
 }
 
 // ─── Safe module resolution (never throws at import time) ────────────────────

@@ -2,20 +2,21 @@
 
 > Production-ready, cross-platform TypeScript SDK for intelligent document scanning and structured data extraction in React Native applications.
 
-**DataLift** accepts images (Base64 or file URI), runs a unified **3-stage pipeline** — native OCR → rule-based NLP parser → optional on-device LayoutLMv3 enhancement — and returns a richly-typed [`DataLiftResponse`](#dataliftresponse-schema) object from a single `await DataLift.extract(...)` call.
+**DataLift** accepts images (Base64 or file URI), runs a unified **up-to-5-stage pipeline** — native OCR → rule-based NLP parser → confidence scoring → optional auto-downloaded LayoutLMv3 on-device AI → optional generic AI fallback — and returns a richly-typed [`DataLiftResponse`](#dataliftresponse-schema) object from a single `await DataLift.extract(...)` call.
 
 [![npm version](https://img.shields.io/npm/v/@kajeevan025/react-native-datalift)](https://www.npmjs.com/package/@kajeevan025/react-native-datalift)
 [![license](https://img.shields.io/npm/l/@kajeevan025/react-native-datalift)](LICENSE)
 
 ## Features
 
-- **3-stage pipeline** — Native OCR → Rule-based NLP parser → Optional LayoutLMv3 on-device AI
+- **Up-to-5-stage pipeline** — Native OCR → Rule-based NLP parser → Confidence scoring → LayoutLMv3 AI → Generic AI fallback
 - **Offline-first** — Apple Vision (iOS) and Google ML Kit (Android) with Tesseract.js fallback
 - **Smart parser** — Column-table, vertical-form, and multi-line block detection with address/phone/policy-text filtering
-- **LayoutLMv3 integration** — CoreML on iOS, ONNX on Android; auto-fills gaps left by the parser
+- **LayoutLMv3 auto-download** — Model is discovered or downloaded automatically from GitHub Releases; CoreML (iOS) and ONNX Runtime (Android); no manual bundling required
+- **Richer JSON output** — Payment details (method, card, bank), delivery details (address, tracking, carrier), notes, per-line-item `unit`, `listPrice`, currency code, `referenceNumber`, `workOrderNumber`
+- **Confidence breakdown** — Per-factor scoring (`ocrQuality`, `fieldPopulation`, `numericConsistency`, `docTypeCertainty`, `keywordMatch`) alongside the composite score
 - **Strongly typed** — Full TypeScript strict mode, no `any`
 - **Multi-document** — Invoices, receipts, purchase orders, work orders, bills, quotes, CMMS documents
-- **Confidence scoring** — 5-factor composite score per extraction
 - **React Native** — iOS + Android, Old & New Architecture (TurboModules), RN ≥ 0.70
 - **Dual build** — ESM + CJS, works with Metro bundler and Node.js test runners
 
@@ -58,16 +59,31 @@ Add to `android/app/src/main/AndroidManifest.xml`:
 ```typescript
 import { DataLift } from "@kajeevan025/react-native-datalift";
 
-// Basic extraction — OCR + rule-based parser
+// Optional: pre-warm LayoutLMv3 model at startup
+DataLift.configure({
+  autoDownloadLayoutLMv3: true,
+  onModelDownloadProgress: (p) =>
+    console.log(`Model: ${Math.round(p.progressPercent)}%`),
+});
+await DataLift.prepareModel(); // auto-discovers or downloads model in background
+
+// Basic extraction — OCR + rule-based parser + auto LayoutLMv3
 const result = await DataLift.extract({
   image: "file:///path/to/document.jpg",
 });
 
-console.log(result.supplier.name); // "ACME Corp"
-console.log(result.transaction.invoiceNumber); // "INV-2024-0042"
-console.log(result.totals.grandTotal); // 1234.56
-console.log(result.metadata.confidenceScore); // 0.87
-console.log(result.parts.length); // 5  (line items)
+console.log(result.supplier.name);                    // "ACME Corp"
+console.log(result.transaction.invoiceNumber);         // "INV-2024-0042"
+console.log(result.transaction.referenceNumber);       // "REF-7890"
+console.log(result.totals.grandTotal);                 // 1234.56
+console.log(result.totals.currency);                   // "USD"
+console.log(result.metadata.confidenceScore);          // 0.87
+console.log(result.metadata.fieldCount);               // 24
+console.log(result.paymentDetails?.method);            // "Credit Card"
+console.log(result.deliveryDetails?.trackingNumber);   // "1Z999AA10123456784"
+console.log(result.notes);                             // "Handle with care"
+console.log(result.parts[0]?.unit);                    // "EA"
+console.log(result.parts.length);                      // 5  (line items)
 ```
 
 ---
@@ -128,6 +144,8 @@ interface DataLiftExtractOptions {
   layoutLMv3LabelsPath?: string;
   /** Throw instead of warning when LayoutLMv3 fails */
   requireLayoutLMv3?: boolean;
+  /** Progress callback for auto-download (fires only when download is triggered) */
+  onModelDownloadProgress?: (progress: ModelDownloadProgress) => void;
 }
 ```
 
@@ -139,11 +157,20 @@ interface DataLiftExtractOptions {
 interface DataLiftResponse {
   metadata: {
     documentType: DataLiftDocumentType; // "invoice" | "receipt" | ...
-    confidenceScore: number; // 0–1 composite score
-    ocrProvider: string; // which OCR engine was used
-    aiProviderUsed?: string; // which AI provider ran (if any)
+    confidenceScore: number;            // 0–1 composite score
+    confidenceBreakdown?: {             // NEW in v1.2.4 — per-factor scores
+      ocrQuality: number;
+      fieldPopulation: number;
+      numericConsistency: number;
+      docTypeCertainty: number;
+      keywordMatch: number;
+    };
+    fieldCount?: number;                // NEW in v1.2.4 — non-empty fields extracted
+    ocrProvider: string;                // which OCR engine was used
+    aiProviderUsed?: string;            // which AI provider ran (if any)
+    layoutLMv3Used?: boolean;           // true when LayoutLMv3 ran and improved results
     processingTimeMs: number;
-    warnings: string[]; // non-fatal issues from any stage
+    warnings: string[];                 // non-fatal issues from any stage
   };
 
   supplier: {
@@ -166,25 +193,21 @@ interface DataLiftResponse {
 
   buyer: {
     name: string;
-    address: {
-      /* same shape as supplier.address */
-    };
-    contact: {
-      /* same shape as supplier.contact */
-    };
+    address: { /* same shape as supplier.address */ };
+    contact: { /* same shape as supplier.contact */ };
   };
 
   transaction: {
     invoiceNumber: string;
     purchaseOrderNumber: string;
-    invoiceDate: string; // ISO-8601 date
-    dueDate: string; // ISO-8601 date
-    transactionTime: string; // ISO-8601 time
-    paymentTerms: string; // e.g. "Net 30"
-    currency: string; // ISO-4217 e.g. "USD"
+    invoiceDate: string;        // ISO-8601 date
+    dueDate: string;            // ISO-8601 date
+    transactionTime: string;    // ISO-8601 time
+    paymentTerms: string;       // e.g. "Net 30"
+    currency: string;           // ISO-4217 e.g. "USD"
     paymentMethod: string;
-    referenceNumber: string;
-    workOrderNumber: string;
+    referenceNumber: string;    // NEW in v1.2.4
+    workOrderNumber: string;    // NEW in v1.2.4
   };
 
   parts: Array<{
@@ -192,8 +215,9 @@ interface DataLiftResponse {
     partNumber: string;
     description: string;
     quantity: number;
-    unit: string;
+    unit: string;               // NEW in v1.2.4 — e.g. "EA", "KG", "L", "HR"
     unitPrice: number;
+    listPrice?: number;         // NEW in v1.2.4 — original list price before discount
     totalAmount: number;
     currency: string;
     condition: string;
@@ -206,13 +230,34 @@ interface DataLiftResponse {
     totalDiscount: number;
     shippingCost: number;
     grandTotal: number;
-    currency: string;
+    currency: string;           // NEW in v1.2.4 — ISO-4217 currency code
     amountDue: number;
     amountPaid: number;
     balanceDue: number;
   };
 
-  rawText?: string; // Present when extractRawText: true
+  // NEW in v1.2.4 ────────────────────────────────────────────────────
+  paymentDetails?: {
+    method: string;             // "Credit Card" | "EFT" | "Cash" | ...
+    reference: string;          // transaction/payment reference
+    cardType?: string;          // "Visa" | "Mastercard" | ...
+    cardLast4?: string;         // last 4 digits
+    bankBsb?: string;           // BSB (AU) or routing number
+    bankAccount?: string;       // masked account number
+    receiptNumber?: string;
+  };
+
+  deliveryDetails?: {
+    address?: string;           // delivery address raw string
+    date?: string;              // ISO-8601 delivery / ship date
+    trackingNumber?: string;
+    carrier?: string;           // "Australia Post" | "FedEx" | ...
+    shippingMethod?: string;    // "Express" | "Standard" | ...
+  };
+
+  notes?: string;               // General freeform notes/instructions from document
+
+  rawText?: string;             // Present when extractRawText: true
 }
 ```
 
@@ -254,39 +299,42 @@ await DataLift.extract({ image: base64, ocrProvider: "my-ocr" });
 
 ---
 
-## LayoutLMv3 On-Device AI (Optional)
+## LayoutLMv3 On-Device AI (Auto-download — v1.2.4+)
 
-LayoutLMv3 is an optional **stage 4** that fills in fields the rule-based parser missed. It runs entirely on-device — no network request.
+LayoutLMv3 is an optional **stage 4** that fills in fields the rule-based parser missed. It runs entirely on-device — no network inference request. Starting in **v1.2.4**, the model is **automatically discovered or downloaded** from GitHub Releases — no manual bundling steps.
 
-- **iOS** uses CoreML (`MLModel`) — requires a `.mlmodelc` or `.mlpackage` file
-- **Android** uses ONNX Runtime Mobile — requires a `.onnx` file
+- **iOS** uses CoreML (`MLModel`) — `.mlpackage.zip` bundle
+- **Android** uses ONNX Runtime Mobile — `.onnx` file
 
-### Step 1 — Prepare your model
-
-| Platform | Format                        | How to create                                         |
-| -------- | ----------------------------- | ----------------------------------------------------- |
-| iOS      | `.mlmodelc` (compiled CoreML) | `coremltools.convert()` from a LayoutLMv3 ONNX export |
-| Android  | `.onnx`                       | Fine-tune and export with `transformers` + `optimum`  |
-
-> **Note**: DataLift expects a **token-classification** fine-tuned model. Labels must include `O` plus B-/I- tags for fields like `INVOICE_NUMBER`, `DATE`, `VENDOR_NAME`, `GRAND_TOTAL`.
-
-Download the base model weights as a starting point:
-
-```sh
-yarn model:layoutlmv3:download
-```
-
-### Step 2 — Bundle the model
-
-**iOS**: Add the `.mlmodelc` (or `.mlpackage`) and `layoutlmv3_labels.txt` to your Xcode project, ensuring they are included in **Copy Bundle Resources**.
-
-**Android**: Place the `.onnx` file in `android/app/src/main/assets/` (or `assets/models/`). DataLift extracts it to `filesDir` on first use.
-
-### Step 3 — Configure and use
+### Zero-config auto-download
 
 ```typescript
 import { DataLift } from "@kajeevan025/react-native-datalift";
 
+DataLift.configure({
+  autoDownloadLayoutLMv3: true,               // enable background download
+  layoutLMv3ModelUrl: undefined,              // optional override URL
+  onModelDownloadProgress: (p) =>
+    console.log(`Downloading model: ${Math.round(p.progressPercent)}%`),
+});
+
+// Pre-warm at startup (recommended — download happens once, cached permanently)
+await DataLift.prepareModel();
+
+// extract() will automatically use LayoutLMv3 when ready
+const result = await DataLift.extract({ image: uri });
+```
+
+`prepareModel()` will:
+1. Check if a previously-downloaded model exists in app storage
+2. If not, download the appropriate model for the platform from GitHub Releases
+3. Configure the native LayoutLMv3 engine silently in the background
+
+### Manual path configuration (advanced)
+
+If you have your own fine-tuned model file already bundled or stored locally:
+
+```typescript
 // Call once at app startup (resolves and validates the model path)
 const configured = await DataLift.configureLayoutLMv3({
   modelPath: "layoutlmv3_invoice.mlmodelc", // bare name resolved from bundle
@@ -295,11 +343,8 @@ const configured = await DataLift.configureLayoutLMv3({
 
 // Check if model is ready
 if (DataLift.isLayoutLMv3Configured()) {
-  console.log("LayoutLMv3 ready — 3 stages active");
+  console.log("LayoutLMv3 ready — 4 stages active");
 }
-
-// extract() automatically runs LayoutLMv3 when configured
-const result = await DataLift.extract({ image: uri });
 ```
 
 ### Compatibility check
@@ -311,9 +356,19 @@ const compat = await DataLift.checkLayoutLMv3Compatibility({
 });
 
 console.log(compat.compatible); // true / false
-console.log(compat.runtime); // "coreml-ios" | "onnx-android"
-console.log(compat.checks); // { model_file, labels_file, label_map, inference }
+console.log(compat.runtime);    // "coreml-ios" | "onnx-android"
+console.log(compat.checks);     // { model_file, labels_file, label_map, inference }
 ```
+
+### Prepare your own model (optional)
+
+Use the included helper script to convert a HuggingFace LayoutLMv3 checkpoint to CoreML (iOS) and int8 ONNX (Android):
+
+```sh
+bash scripts/prepare-model.sh microsoft/layoutlmv3-base ./output-models
+```
+
+The script exports `labels.json` and `vocab.json` alongside the model files. Upload them as a GitHub Release to use with `layoutLMv3ModelUrl`.
 
 ### Custom LayoutLMv3 runner (advanced)
 
@@ -366,9 +421,17 @@ Call once at app startup before any `extract()` calls:
 import { DataLift } from "@kajeevan025/react-native-datalift";
 
 DataLift.configure({
-  aiConfidenceThreshold: 0.7, // default 0.65
+  aiConfidenceThreshold: 0.7,          // default 0.65
   language: "en",
   extractRawText: false,
+
+  // v1.2.4 — LayoutLMv3 auto-download
+  autoDownloadLayoutLMv3: true,         // download model automatically when needed
+  layoutLMv3ModelUrl: undefined,        // optional: override the GitHub Releases URL
+  onModelDownloadProgress: (p) => {
+    // p: { totalBytes, downloadedBytes, progressPercent, modelFile }
+    console.log(`${p.modelFile}: ${Math.round(p.progressPercent)}%`);
+  },
 });
 ```
 
@@ -377,6 +440,10 @@ DataLift.configure({
 ## Additional APIs
 
 ```typescript
+// Pre-warm LayoutLMv3 — auto-discovers existing model or downloads from GitHub Releases
+// Returns the model paths once ready; rejects if download is disabled and no model found
+await DataLift.prepareModel();
+
 // Extract raw OCR text only
 const text = await DataLift.extractText({ image: base64, language: "en" });
 
@@ -455,15 +522,19 @@ yarn android   # Android emulator
 
 ---
 
-## 3-Stage Pipeline
+## Extraction Pipeline
 
 ```
 DataLift.extract()
    │
    ├─ 1. OCREngine.run()              Native (Vision/MLKit) → Tesseract fallback
    ├─ 2. RuleBasedParser.parse()      Column-table / form / multi-line NLP
-   ├─ 3. ConfidenceEngine.score()     5-factor composite scoring
-   ├─ 4. LayoutLMv3 prediction?       On-device model fills gaps (if configured)
+   │                                   ↳ payment details, delivery details, notes,
+   │                                     unit-of-measure, reference numbers
+   ├─ 3. ConfidenceEngine.score()     5-factor composite + per-factor breakdown
+   ├─ 4. LayoutLMv3 prediction?       Auto-downloaded on-device model fills gaps
+   │                                   ↳ auto-discovers cached file → downloads if
+   │                                     autoDownloadLayoutLMv3=true (background)
    └─ 5. AIEngine.enhance()?          Generic AI fallback (if conf < threshold)
 ```
 

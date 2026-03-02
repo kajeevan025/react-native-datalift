@@ -5,6 +5,44 @@ All notable changes to `react-native-datalift` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.4] — 2026-03-02
+
+### Added
+
+- **LayoutLMv3 auto-discovery & auto-download** — the model is now found and activated automatically
+  - `ModelManager` utility (`src/utils/ModelManager.ts`) manages the full on-device model lifecycle:
+    checks local storage → downloads from GitHub Releases if missing → auto-configures the native engine
+  - `DataLiftSDK.prepareModel({ autoDownload: true, onProgress })` — new public API to warm-up the model at launch
+  - `DataLift.configure({ autoDownloadLayoutLMv3: true })` — global flag; fires a background download on first `extract()` and uses the model on every subsequent call
+  - `ModelManager`, `ModelPaths`, `ModelDownloadProgress`, `EnsureModelOptions` all exported from the package root
+  - `scripts/prepare-model.sh` — script to convert HuggingFace LayoutLMv3 → CoreML (iOS) + int8 ONNX (Android) and package for GitHub Releases
+- **Native model storage helpers**
+  - iOS `getModelStorageDir()` — returns `Library/Application Support/DataLift/models/layoutlmv3/`, creates it if absent
+  - iOS `downloadModelFile({ url, destination })` — streaming `URLSession.downloadTask`, no in-memory buffering
+  - Android `getModelStorageDir()` — returns `<filesDir>/DataLift/models/layoutlmv3/`
+  - Android `downloadModelFile({ url, destination })` — streaming `HttpURLConnection` with 128 KB buffer
+- **Richer JSON schema** (all new fields optional, zero breaking changes)
+  - `DataLiftPaymentDetails` — `method`, `reference`, `cardType`, `cardLast4`, `bankBsb`, `bankAccount`, `receiptNumber`
+  - `DataLiftDeliveryDetails` — `address`, `date`, `trackingNumber`, `carrier`, `shippingMethod`
+  - `DataLiftResponse.paymentDetails`, `.deliveryDetails`, `.notes`
+  - `DataLiftPart.unit`, `.listPrice`
+  - `DataLiftTotals.currency`
+  - `DataLiftTransaction.referenceNumber`, `.workOrderNumber`
+  - `DataLiftMetadata.confidenceBreakdown` (`ocr`, `fields`, `numeric`, `docType`, `keyword`), `.fieldCount`
+- **Improved extraction accuracy**
+  - `extractPaymentDetails()` — detects payment method, card brand/last4, BSB, bank account, receipt/auth codes
+  - `extractDeliveryDetails()` — detects ship-to address, dispatch date, tracking number, carrier, shipping method
+  - `extractNotes()` — captures labeled note/remark/instruction blocks
+  - `parseLineItem()` now extracts unit of measure (ea, pcs, kg, m, hr, box, …) with normalisation
+  - `RuleBasedParser` extracts `referenceNumber`, `workOrderNumber` from transaction; emits `currency` on totals; computes `fieldCount`
+  - `UOM` pattern added to `PATTERNS` for unit-of-measure regex reuse
+
+### Changed
+
+- `DataLift.configure()` now accepts `autoDownloadLayoutLMv3`, `layoutLMv3ModelUrl`, `onModelDownloadProgress`
+- `extract()` step 5.5 now includes auto-discovery and background download before the existing LayoutLMv3 prediction block
+- `NativeDataLift` interface extended with `getModelStorageDir()` and `downloadModelFile()` methods
+
 ## [1.2.3] — 2026-03-02
 
 ### Changed
