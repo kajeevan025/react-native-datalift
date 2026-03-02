@@ -476,7 +476,8 @@ export class RuleBasedParser {
       }
       const nums: NumInfo[] = [];
       // Number pattern: handles comma-formatted (1,234) and plain numbers up to 9 digits
-      const numRx = /([\$€£₹¥]?\s*)?(?:(\d{1,3}(?:,\d{3})+)|(\d{1,9}))(?:\.(\d{1,4}))?\s*(%)?/g;
+      const numRx =
+        /([\$€£₹¥]?\s*)?(?:(\d{1,3}(?:,\d{3})+)|(\d{1,9}))(?:\.(\d{1,4}))?\s*(%)?/g;
       let m: RegExpExecArray | null;
       while ((m = numRx.exec(line)) !== null) {
         const intPart = (m[2] ?? m[3] ?? "").replace(/,/g, "");
