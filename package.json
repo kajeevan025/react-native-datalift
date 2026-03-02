@@ -1,6 +1,6 @@
 {
   "name": "@kajeevan025/react-native-datalift",
-  "version": "1.2.4",
+  "version": "1.2.5",
   "description": "Production-ready document scanner SDK with native OCR, rule-based NLP, and optional AI extraction for React Native",
   "main": "lib/cjs/index.js",
   "module": "lib/esm/index.js",

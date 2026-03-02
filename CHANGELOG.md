@@ -5,6 +5,36 @@ All notable changes to `react-native-datalift` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.5] — 2026-03-02
+
+### Fixed — Real-world parser accuracy (92/92 ground-truth tests)
+
+- **`invHeaderRx` false capture** — `^(?:invoice|inv)[\s#]*` allowed the `inv` branch to match `INVOICE` and capture `OICE` as the invoice number; changed to `^invoice\s+(\d[\w\-/]{2,20})$` (full word, digit-start capture)
+- **`bodyStartKeywords` matching company names** — bare `^total` was matching `Total Maintenance Solutions South, Inc.` → `headerEnd = 0` → blank `supplier.name`; replaced with `sub[\s\-]*total|grand\s*total` only
+- **`extractFromColumnTable` wrong header selection** — `PO Number Term Description` row was chosen as the product-table header; added `strongHeaderIdx` (last header containing `qty` / `ordered` / `unit price` / `unit cost` / `shipped` indicators), falling back to the original weak header
+- **Look-ahead absorbing date lines** — when `itemName` was a short UOM token (`EA`) the look-ahead grabbed the next line (`11/29/2023 ORDER NUMBER`) as the description; guarded with a decimal check (`lastCandidateNum !== Math.floor(lastCandidateNum)`) — product totals are decimals, date-line last tokens are integers
+- **$100 K sanity guard** — `extractFromColumnTable` now skips any line item whose `total > 100 000`, preventing runaway values from misaligned columns
+- **ORDER NUMBER multi-line fallback** — `extractTransaction` now reads the value on the following line when `ORDER NUMBER` appears alone, mapping it to `purchaseOrderNumber`
+- **PREPAID payment terms** — added scan of the `Term Description` block for `PREPAID` and `NET-N` patterns; previously returned `undefined`
+- **Payment-terminal & page-separator lines** — extended `NON_PRODUCT_LINE_RX` in `primitives.ts` with card-reader patterns (`mastercard`, `visa`, `appr code`, `tvr:`, `aid:`, `batch #`, `rrn:`) and page separators (`--- Page 2 ---`)
+
+### Added
+
+- **`RealWorldAccuracy` test suite** (`src/__tests__/RealWorldAccuracy.test.ts`) — 92 ground-truth assertions across 5 real invoice / receipt documents (HSC tabular parts invoice, TMS Cash Sale, NAPA Auto, Lowe's, generic retail); all 92 pass
+
+### Changed — Example app
+
+- `ResultTile` in `example/App.tsx` now renders every field in the current schema:
+  - **Supplier**: phone, email, full address
+  - **Buyer / Bill-To**: new conditional section (was never shown)
+  - **Transaction**: PO #, invoice date, due date, payment terms, payment mode
+  - **Totals**: full breakdown — subtotal → tax → shipping → discount → amount paid → balance due → grand total (was grand total only)
+  - **Line items**: up to 5 shown (was 3); each row includes SKU and currency
+  - **Confidence breakdown**: per-factor percentages (ocr / fields / numeric / docType / keywords)
+  - **Currency badge** added to the result-card header row
+
+---
+
 ## [1.2.4] — 2026-03-02
 
 ### Added
