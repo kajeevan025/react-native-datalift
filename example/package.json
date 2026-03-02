@@ -5,9 +5,7 @@
   "scripts": {
     "android": "react-native run-android",
     "ios": "react-native run-ios",
-    "start": "lsof -ti:8081 | xargs kill -9 2>/dev/null || true && react-native start --reset-cache",
-    "process-dataset": "ts-node TestDataSetProcessor.ts",
-    "test:extraction": "cd .. && npm test -- src/__tests__/DocumentProcessor.test.ts"
+    "start": "lsof -ti:8081 | xargs kill -9 2>/dev/null || true && react-native start --reset-cache"
   },
   "dependencies": {
     "react": "18.3.1",
@@ -28,7 +26,6 @@
     "@types/react-test-renderer": "^18.3.0",
     "babel-plugin-module-resolver": "^5.0.0",
     "prettier": "3.3.3",
-    "ts-node": "^10.9.0",
     "typescript": "5.0.4"
   },
   "engines": {
