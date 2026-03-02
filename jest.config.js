@@ -2,6 +2,7 @@
 module.exports = {
   preset: 'react-native',
   transform: {
+    '^.+\\.(js|jsx)$': 'babel-jest',
     '^.+\\.tsx?$': ['ts-jest', { tsconfig: 'tsconfig.test.json' }],
   },
   testRegex: '(/__tests__/.*|(\\.|/)(test|spec))\\.(ts|tsx)$',
