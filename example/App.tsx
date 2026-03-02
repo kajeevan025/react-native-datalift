@@ -48,11 +48,15 @@ const ResultTile = ({ result }: { result: DataLiftResponse }) => {
   const poNumber = result.transaction?.purchaseOrderNumber ?? "—";
   const refNo = result.transaction?.referenceNumber ?? "—";
   const workOrder = result.transaction?.workOrderNumber ?? "—";
-  const invoiceDate = result.transaction?.invoiceDate ?? result.transaction?.transactionDate ?? "—";
+  const invoiceDate =
+    result.transaction?.invoiceDate ??
+    result.transaction?.transactionDate ??
+    "—";
   const dueDate = result.transaction?.dueDate ?? "—";
   const paymentTerms = result.transaction?.paymentTerms ?? "—";
   const paymentMode = result.transaction?.paymentMode ?? "—";
-  const currency = result.transaction?.currency ?? result.totals?.currency ?? "";
+  const currency =
+    result.transaction?.currency ?? result.totals?.currency ?? "";
   const lineItems = result.parts?.length ?? 0;
   const aiProvider = result.metadata?.aiProviderUsed ?? "none";
   const fieldCount = result.metadata?.fieldCount ?? 0;
@@ -66,7 +70,9 @@ const ResultTile = ({ result }: { result: DataLiftResponse }) => {
         <Text style={styles.resultType}>{docType}</Text>
         <View style={styles.badgeRow}>
           <Text style={styles.badge}>{confidence}</Text>
-          {currency ? <Text style={styles.badgeCurrency}>{currency}</Text> : null}
+          {currency ? (
+            <Text style={styles.badgeCurrency}>{currency}</Text>
+          ) : null}
         </View>
       </View>
 
@@ -75,14 +81,20 @@ const ResultTile = ({ result }: { result: DataLiftResponse }) => {
       <JsonField label="Name" value={result.supplier?.name} />
       <JsonField label="Phone" value={result.supplier?.contact?.phone} />
       <JsonField label="Email" value={result.supplier?.contact?.email} />
-      <JsonField label="Address" value={result.supplier?.address?.fullAddress} />
+      <JsonField
+        label="Address"
+        value={result.supplier?.address?.fullAddress}
+      />
 
       {/* ── Buyer ── */}
       {(result.buyer?.name || result.buyer?.address?.fullAddress) && (
         <>
           <Text style={styles.subSectionLabel}>Buyer / Bill-To</Text>
           <JsonField label="Name" value={result.buyer.name} />
-          <JsonField label="Address" value={result.buyer.address?.fullAddress} />
+          <JsonField
+            label="Address"
+            value={result.buyer.address?.fullAddress}
+          />
         </>
       )}
 
@@ -99,12 +111,54 @@ const ResultTile = ({ result }: { result: DataLiftResponse }) => {
 
       {/* ── Totals ── */}
       <Text style={styles.subSectionLabel}>Totals</Text>
-      <JsonField label="Subtotal" value={result.totals?.subtotal != null ? `${result.totals.subtotal} ${currency}`.trim() : undefined} />
-      <JsonField label="Tax" value={result.totals?.totalTax != null ? `${result.totals.totalTax} ${currency}`.trim() : undefined} />
-      <JsonField label="Shipping" value={result.totals?.shippingCost != null ? `${result.totals.shippingCost} ${currency}`.trim() : undefined} />
-      <JsonField label="Discount" value={result.totals?.discount != null ? `-${result.totals.discount} ${currency}`.trim() : undefined} />
-      <JsonField label="Amount Paid" value={result.totals?.amountPaid != null ? `${result.totals.amountPaid} ${currency}`.trim() : undefined} />
-      <JsonField label="Balance Due" value={result.totals?.balanceDue != null ? `${result.totals.balanceDue} ${currency}`.trim() : undefined} />
+      <JsonField
+        label="Subtotal"
+        value={
+          result.totals?.subtotal != null
+            ? `${result.totals.subtotal} ${currency}`.trim()
+            : undefined
+        }
+      />
+      <JsonField
+        label="Tax"
+        value={
+          result.totals?.totalTax != null
+            ? `${result.totals.totalTax} ${currency}`.trim()
+            : undefined
+        }
+      />
+      <JsonField
+        label="Shipping"
+        value={
+          result.totals?.shippingCost != null
+            ? `${result.totals.shippingCost} ${currency}`.trim()
+            : undefined
+        }
+      />
+      <JsonField
+        label="Discount"
+        value={
+          result.totals?.discount != null
+            ? `-${result.totals.discount} ${currency}`.trim()
+            : undefined
+        }
+      />
+      <JsonField
+        label="Amount Paid"
+        value={
+          result.totals?.amountPaid != null
+            ? `${result.totals.amountPaid} ${currency}`.trim()
+            : undefined
+        }
+      />
+      <JsonField
+        label="Balance Due"
+        value={
+          result.totals?.balanceDue != null
+            ? `${result.totals.balanceDue} ${currency}`.trim()
+            : undefined
+        }
+      />
       <JsonField
         label="Grand Total"
         value={`${result.totals?.grandTotal ?? "—"} ${currency}`.trim()}
@@ -163,9 +217,7 @@ const ResultTile = ({ result }: { result: DataLiftResponse }) => {
       {/* ── Line items ── */}
       {lineItems > 0 && (
         <>
-          <Text style={styles.subSectionLabel}>
-            Line Items ({lineItems})
-          </Text>
+          <Text style={styles.subSectionLabel}>Line Items ({lineItems})</Text>
           {result.parts.slice(0, 5).map((part, i) => (
             <Text key={i} style={styles.resultMeta}>
               {part.itemName}
@@ -188,14 +240,24 @@ const ResultTile = ({ result }: { result: DataLiftResponse }) => {
           <Text style={styles.subSectionLabel}>Confidence Breakdown</Text>
           <JsonField label="OCR" value={`${Math.round(cb.ocr * 100)}%`} />
           <JsonField label="Fields" value={`${Math.round(cb.fields * 100)}%`} />
-          <JsonField label="Numeric" value={`${Math.round(cb.numeric * 100)}%`} />
-          <JsonField label="Doc Type" value={`${Math.round(cb.docType * 100)}%`} />
-          <JsonField label="Keywords" value={`${Math.round(cb.keyword * 100)}%`} />
+          <JsonField
+            label="Numeric"
+            value={`${Math.round(cb.numeric * 100)}%`}
+          />
+          <JsonField
+            label="Doc Type"
+            value={`${Math.round(cb.docType * 100)}%`}
+          />
+          <JsonField
+            label="Keywords"
+            value={`${Math.round(cb.keyword * 100)}%`}
+          />
         </>
       )}
 
       <Text style={styles.resultMeta}>
-        Fields: {fieldCount}{"  "}AI: {aiProvider}
+        Fields: {fieldCount}
+        {"  "}AI: {aiProvider}
       </Text>
 
       {warnings.length > 0 && (

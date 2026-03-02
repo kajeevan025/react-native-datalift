@@ -579,6 +579,20 @@ export const DataLiftSDK = {
           ...(response.metadata.warnings ?? []),
           `LayoutLMv3 failed: ${msg}`,
         ];
+        // If the labels file is permanently incompatible, clear the global
+        // configuration so we don't retry with the same bad file on every
+        // subsequent extract() call.
+        if (
+          msg.includes("labels file appears incompatible") ||
+          msg.includes("labels are empty")
+        ) {
+          _layoutLMv3Config.configured = false;
+          _layoutLMv3Config.modelPath = null;
+          _layoutLMv3Config.labelsPath = null;
+          logger.warn(
+            "LayoutLMv3 labels invalid — clearing configuration to prevent repeated failures.",
+          );
+        }
       }
     }
 

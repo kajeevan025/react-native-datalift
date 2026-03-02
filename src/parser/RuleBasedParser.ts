@@ -659,7 +659,8 @@ export class RuleBasedParser {
       //       an integer) do not absorb standalone label lines as item names.
       if (itemName.length < 3 || !/[A-Za-z]{3,}/.test(itemName)) {
         const lastCandidateNum = candidateNums[candidateNums.length - 1];
-        const lastNumHasDecimal = lastCandidateNum !== Math.floor(lastCandidateNum);
+        const lastNumHasDecimal =
+          lastCandidateNum !== Math.floor(lastCandidateNum);
         if (candidateNums.length >= 2 && lastNumHasDecimal) {
           const nextLine = (lines[i + 1] ?? "").trim();
           if (

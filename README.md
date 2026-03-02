@@ -72,18 +72,18 @@ const result = await DataLift.extract({
   image: "file:///path/to/document.jpg",
 });
 
-console.log(result.supplier.name);                    // "ACME Corp"
-console.log(result.transaction.invoiceNumber);         // "INV-2024-0042"
-console.log(result.transaction.referenceNumber);       // "REF-7890"
-console.log(result.totals.grandTotal);                 // 1234.56
-console.log(result.totals.currency);                   // "USD"
-console.log(result.metadata.confidenceScore);          // 0.87
-console.log(result.metadata.fieldCount);               // 24
-console.log(result.paymentDetails?.method);            // "Credit Card"
-console.log(result.deliveryDetails?.trackingNumber);   // "1Z999AA10123456784"
-console.log(result.notes);                             // "Handle with care"
-console.log(result.parts[0]?.unit);                    // "EA"
-console.log(result.parts.length);                      // 5  (line items)
+console.log(result.supplier.name); // "ACME Corp"
+console.log(result.transaction.invoiceNumber); // "INV-2024-0042"
+console.log(result.transaction.referenceNumber); // "REF-7890"
+console.log(result.totals.grandTotal); // 1234.56
+console.log(result.totals.currency); // "USD"
+console.log(result.metadata.confidenceScore); // 0.87
+console.log(result.metadata.fieldCount); // 24
+console.log(result.paymentDetails?.method); // "Credit Card"
+console.log(result.deliveryDetails?.trackingNumber); // "1Z999AA10123456784"
+console.log(result.notes); // "Handle with care"
+console.log(result.parts[0]?.unit); // "EA"
+console.log(result.parts.length); // 5  (line items)
 ```
 
 ---
@@ -157,20 +157,21 @@ interface DataLiftExtractOptions {
 interface DataLiftResponse {
   metadata: {
     documentType: DataLiftDocumentType; // "invoice" | "receipt" | ...
-    confidenceScore: number;            // 0–1 composite score
-    confidenceBreakdown?: {             // NEW in v1.2.4 — per-factor scores
+    confidenceScore: number; // 0–1 composite score
+    confidenceBreakdown?: {
+      // NEW in v1.2.4 — per-factor scores
       ocrQuality: number;
       fieldPopulation: number;
       numericConsistency: number;
       docTypeCertainty: number;
       keywordMatch: number;
     };
-    fieldCount?: number;                // NEW in v1.2.4 — non-empty fields extracted
-    ocrProvider: string;                // which OCR engine was used
-    aiProviderUsed?: string;            // which AI provider ran (if any)
-    layoutLMv3Used?: boolean;           // true when LayoutLMv3 ran and improved results
+    fieldCount?: number; // NEW in v1.2.4 — non-empty fields extracted
+    ocrProvider: string; // which OCR engine was used
+    aiProviderUsed?: string; // which AI provider ran (if any)
+    layoutLMv3Used?: boolean; // true when LayoutLMv3 ran and improved results
     processingTimeMs: number;
-    warnings: string[];                 // non-fatal issues from any stage
+    warnings: string[]; // non-fatal issues from any stage
   };
 
   supplier: {
@@ -193,21 +194,25 @@ interface DataLiftResponse {
 
   buyer: {
     name: string;
-    address: { /* same shape as supplier.address */ };
-    contact: { /* same shape as supplier.contact */ };
+    address: {
+      /* same shape as supplier.address */
+    };
+    contact: {
+      /* same shape as supplier.contact */
+    };
   };
 
   transaction: {
     invoiceNumber: string;
     purchaseOrderNumber: string;
-    invoiceDate: string;        // ISO-8601 date
-    dueDate: string;            // ISO-8601 date
-    transactionTime: string;    // ISO-8601 time
-    paymentTerms: string;       // e.g. "Net 30"
-    currency: string;           // ISO-4217 e.g. "USD"
+    invoiceDate: string; // ISO-8601 date
+    dueDate: string; // ISO-8601 date
+    transactionTime: string; // ISO-8601 time
+    paymentTerms: string; // e.g. "Net 30"
+    currency: string; // ISO-4217 e.g. "USD"
     paymentMethod: string;
-    referenceNumber: string;    // NEW in v1.2.4
-    workOrderNumber: string;    // NEW in v1.2.4
+    referenceNumber: string; // NEW in v1.2.4
+    workOrderNumber: string; // NEW in v1.2.4
   };
 
   parts: Array<{
@@ -215,9 +220,9 @@ interface DataLiftResponse {
     partNumber: string;
     description: string;
     quantity: number;
-    unit: string;               // NEW in v1.2.4 — e.g. "EA", "KG", "L", "HR"
+    unit: string; // NEW in v1.2.4 — e.g. "EA", "KG", "L", "HR"
     unitPrice: number;
-    listPrice?: number;         // NEW in v1.2.4 — original list price before discount
+    listPrice?: number; // NEW in v1.2.4 — original list price before discount
     totalAmount: number;
     currency: string;
     condition: string;
@@ -230,7 +235,7 @@ interface DataLiftResponse {
     totalDiscount: number;
     shippingCost: number;
     grandTotal: number;
-    currency: string;           // NEW in v1.2.4 — ISO-4217 currency code
+    currency: string; // NEW in v1.2.4 — ISO-4217 currency code
     amountDue: number;
     amountPaid: number;
     balanceDue: number;
@@ -238,26 +243,26 @@ interface DataLiftResponse {
 
   // NEW in v1.2.4 ────────────────────────────────────────────────────
   paymentDetails?: {
-    method: string;             // "Credit Card" | "EFT" | "Cash" | ...
-    reference: string;          // transaction/payment reference
-    cardType?: string;          // "Visa" | "Mastercard" | ...
-    cardLast4?: string;         // last 4 digits
-    bankBsb?: string;           // BSB (AU) or routing number
-    bankAccount?: string;       // masked account number
+    method: string; // "Credit Card" | "EFT" | "Cash" | ...
+    reference: string; // transaction/payment reference
+    cardType?: string; // "Visa" | "Mastercard" | ...
+    cardLast4?: string; // last 4 digits
+    bankBsb?: string; // BSB (AU) or routing number
+    bankAccount?: string; // masked account number
     receiptNumber?: string;
   };
 
   deliveryDetails?: {
-    address?: string;           // delivery address raw string
-    date?: string;              // ISO-8601 delivery / ship date
+    address?: string; // delivery address raw string
+    date?: string; // ISO-8601 delivery / ship date
     trackingNumber?: string;
-    carrier?: string;           // "Australia Post" | "FedEx" | ...
-    shippingMethod?: string;    // "Express" | "Standard" | ...
+    carrier?: string; // "Australia Post" | "FedEx" | ...
+    shippingMethod?: string; // "Express" | "Standard" | ...
   };
 
-  notes?: string;               // General freeform notes/instructions from document
+  notes?: string; // General freeform notes/instructions from document
 
-  rawText?: string;             // Present when extractRawText: true
+  rawText?: string; // Present when extractRawText: true
 }
 ```
 
@@ -312,8 +317,8 @@ LayoutLMv3 is an optional **stage 4** that fills in fields the rule-based parser
 import { DataLift } from "@kajeevan025/react-native-datalift";
 
 DataLift.configure({
-  autoDownloadLayoutLMv3: true,               // enable background download
-  layoutLMv3ModelUrl: undefined,              // optional override URL
+  autoDownloadLayoutLMv3: true, // enable background download
+  layoutLMv3ModelUrl: undefined, // optional override URL
   onModelDownloadProgress: (p) =>
     console.log(`Downloading model: ${Math.round(p.progressPercent)}%`),
 });
@@ -326,6 +331,7 @@ const result = await DataLift.extract({ image: uri });
 ```
 
 `prepareModel()` will:
+
 1. Check if a previously-downloaded model exists in app storage
 2. If not, download the appropriate model for the platform from GitHub Releases
 3. Configure the native LayoutLMv3 engine silently in the background
@@ -356,8 +362,8 @@ const compat = await DataLift.checkLayoutLMv3Compatibility({
 });
 
 console.log(compat.compatible); // true / false
-console.log(compat.runtime);    // "coreml-ios" | "onnx-android"
-console.log(compat.checks);     // { model_file, labels_file, label_map, inference }
+console.log(compat.runtime); // "coreml-ios" | "onnx-android"
+console.log(compat.checks); // { model_file, labels_file, label_map, inference }
 ```
 
 ### Prepare your own model (optional)
@@ -421,13 +427,13 @@ Call once at app startup before any `extract()` calls:
 import { DataLift } from "@kajeevan025/react-native-datalift";
 
 DataLift.configure({
-  aiConfidenceThreshold: 0.7,          // default 0.65
+  aiConfidenceThreshold: 0.7, // default 0.65
   language: "en",
   extractRawText: false,
 
   // v1.2.4 — LayoutLMv3 auto-download
-  autoDownloadLayoutLMv3: true,         // download model automatically when needed
-  layoutLMv3ModelUrl: undefined,        // optional: override the GitHub Releases URL
+  autoDownloadLayoutLMv3: true, // download model automatically when needed
+  layoutLMv3ModelUrl: undefined, // optional: override the GitHub Releases URL
   onModelDownloadProgress: (p) => {
     // p: { totalBytes, downloadedBytes, progressPercent, modelFile }
     console.log(`${p.modelFile}: ${Math.round(p.progressPercent)}%`);
