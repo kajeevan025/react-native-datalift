@@ -6,7 +6,7 @@ module.exports = {
   testRegex: '(/__tests__/.*|(\\.|/)(test|spec))\\.(ts|tsx)$',
   moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json', 'node'],
   transformIgnorePatterns: [
-    'node_modules/(?!(react-native|@react-native|react-native-image-picker)/)',
+    'node_modules/(?!(react-native|@react-native|@react-native-community|react-native-image-picker)/)',
   ],
   setupFiles: [],
   collectCoverageFrom: [

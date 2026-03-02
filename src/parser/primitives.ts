@@ -232,19 +232,59 @@ export function extractFirstAmount(text: string): number | undefined {
 
 /** Normalise various date strings to ISO YYYY-MM-DD where possible */
 function normaliseDateString(raw: string): string {
-  // Already ISO
-  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
-
-  // DD/MM/YYYY or DD-MM-YYYY → YYYY-MM-DD
-  const dmy = raw.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/);
-  if (dmy) {
-    return `${dmy[3]}-${dmy[2].padStart(2, "0")}-${dmy[1].padStart(2, "0")}`;
+  // Already ISO – validate range, swap day/month if month is out of range
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    const [y, mStr, dStr] = raw.split("-");
+    const m = parseInt(mStr, 10);
+    const d = parseInt(dStr, 10);
+    if (m >= 1 && m <= 12 && d >= 1 && d <= 31) return raw;
+    // Swap: original was stored as YYYY-DD-MM
+    if (d >= 1 && d <= 12 && m >= 1 && m <= 31) return `${y}-${dStr}-${mStr}`;
+    return raw;
   }
 
-  // MM/DD/YYYY heuristic (if first number > 12, treat as day-first)
-  const mdy = raw.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/);
-  if (mdy && parseInt(mdy[1]) > 12) {
-    return `${mdy[3]}-${mdy[1].padStart(2, "0")}-${mdy[2].padStart(2, "0")}`;
+  // YYYY/MM/DD or YYYY-DD-MM variations
+  const ymd = raw.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/);
+  if (ymd) {
+    const a = parseInt(ymd[2], 10);
+    const b = parseInt(ymd[3], 10);
+    const year = ymd[1];
+    // a > 12 means it must be a day (YYYY-DD-MM layout)
+    if (a > 12 && b >= 1 && b <= 12)
+      return `${year}-${ymd[3].padStart(2, "0")}-${ymd[2].padStart(2, "0")}`;
+    if (a >= 1 && a <= 12 && b >= 1 && b <= 31)
+      return `${year}-${ymd[2].padStart(2, "0")}-${ymd[3].padStart(2, "0")}`;
+    return `${year}-${ymd[2].padStart(2, "0")}-${ymd[3].padStart(2, "0")}`;
+  }
+
+  // DD/MM/YYYY or MM/DD/YYYY  (separator is /, - or .)
+  const dmy = raw.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/);
+  if (dmy) {
+    const a = parseInt(dmy[1], 10);
+    const b = parseInt(dmy[2], 10);
+    const year = dmy[3];
+    // Unambiguous: a > 12 means it HAS to be the day (DD/MM/YYYY)
+    if (a > 12 && b >= 1 && b <= 12)
+      return `${year}-${dmy[2].padStart(2, "0")}-${dmy[1].padStart(2, "0")}`;
+    // b > 12 means it HAS to be the day (MM/DD/YYYY)
+    if (b > 12 && a >= 1 && a <= 12)
+      return `${year}-${dmy[1].padStart(2, "0")}-${dmy[2].padStart(2, "0")}`;
+    // Ambiguous (both ≤ 12): default to DD/MM/YYYY (AU/EU convention)
+    return `${year}-${dmy[2].padStart(2, "0")}-${dmy[1].padStart(2, "0")}`;
+  }
+
+  // DD/MM/YY or MM/DD/YY (2-digit year) — expand to 4-digit (2000s)
+  const dmy2 = raw.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2})$/);
+  if (dmy2) {
+    const a = parseInt(dmy2[1], 10);
+    const b = parseInt(dmy2[2], 10);
+    const year = 2000 + parseInt(dmy2[3], 10);
+    if (a > 12 && b >= 1 && b <= 12)
+      return `${year}-${dmy2[2].padStart(2, "0")}-${dmy2[1].padStart(2, "0")}`;
+    if (b > 12 && a >= 1 && a <= 12)
+      return `${year}-${dmy2[1].padStart(2, "0")}-${dmy2[2].padStart(2, "0")}`;
+    // Ambiguous: default US convention MM/DD/YY for North American receipts
+    return `${year}-${dmy2[1].padStart(2, "0")}-${dmy2[2].padStart(2, "0")}`;
   }
 
   return raw;
@@ -289,6 +329,18 @@ export function extractDates(text: string): {
   if (!result.invoiceDate) {
     const isoMatch = text.match(PATTERNS.DATE_ISO);
     if (isoMatch?.[0]) result.invoiceDate = normaliseDateString(isoMatch[0]);
+  }
+
+  // Last-resort: any bare date (with or without 4-digit year) becomes transactionDate
+  if (!result.transactionDate && !result.invoiceDate) {
+    const anyDate = text.match(/\b(\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4})\b/);
+    if (anyDate?.[1]) {
+      const nd = normaliseDateString(anyDate[1]);
+      // Only accept if it looks like a real date and not a random number
+      if (/\d{4}/.test(nd) || /\d{2}[-/.]\d{2}[-/.]\d{2}/.test(nd)) {
+        result.transactionDate = nd;
+      }
+    }
   }
 
   return result;
@@ -565,7 +617,7 @@ const HEADER_LINE_RX =
  * Catches addresses, phone numbers, store IDs, return policies, boilerplate, etc.
  */
 const NON_PRODUCT_LINE_RX =
-  /(?:^(?:\d+\s+)?(?:po\s*box|p\.?o\.?\s*box)\b)|(?:\b\d+\s+\w+\s+(?:street|st\.?|road|rd\.?|avenue|ave\.?|boulevard|blvd\.?|drive|dr\.?|lane|ln\.?|way|court|ct\.?|place|pl\.?|circle|cir\.?|terrace|ter\.?|highway|hwy\.?|pike|route|rte\.?)\b)|(?:\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?\s+[A-Z]{2}\s+\d{5}(?:-\d{4})?\b)|(?:^\(?\d{3}\)?[\s.\-]*\d{3}[\s.\-]*\d{4}\s*$)|(?:^\(?\d{3}\)?[\s.\-]*\d{3}[\s.\-]*$)|(?:\bwe\s+(?:gladly\s+)?accept|\breturn\s*(?:s|ed)?\s+(?:for|within|policy)|\brefund\b|\bwarranty\b|\bterms?\s*(?:and|&)\s*conditions?\b|\ball\s+(?:goods|items|sales)\b)|(?:^(?:store|loc(?:ation)?)\s+(?:#\s*)?\d+\b)|(?:^\$\s*\d+(?:,\d{3})*(?:\.\d{1,2})?\s*$)|(?:^#?[A-Z]{0,3}\d{5,}\/?\s*$)|(?:\bcustomer\s+signature\b|\bagree\s+to\s+pay\b|\bcard\s+issuer\b|\bthank\s+you\b|\bhave\s+a\s+(?:nice|great|good)\b)|(?:^\d{1,2}\/\d{1,2}\/\s*$)|(?:^(?:www\.|https?:\/\/|[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}))/i;
+  /(?:^(?:\d+\s+)?(?:po\s*box|p\.?o\.?\s*box)\b)|(?:\b\d+\s+\w+\s+(?:street|st\.?|road|rd\.?|avenue|ave\.?|boulevard|blvd\.?|drive|dr\.?|lane|ln\.?|way|court|ct\.?|place|pl\.?|circle|cir\.?|terrace|ter\.?|highway|hwy\.?|pike|route|rte\.?)\b)|(?:\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?\s+[A-Z]{2}\s+\d{5}(?:-\d{4})?\b)|(?:^\(?\d{3}\)?[\s.\-]*\d{3}[\s.\-]*\d{4}\s*$)|(?:^\(?\d{3}\)?[\s.\-]*\d{3}[\s.\-]*$)|(?:\bwe\s+(?:gladly\s+)?accept|\breturn\s*(?:s|ed)?\s+(?:for|within|policy)|\brefund\b|\bwarranty\b|\bterms?\s*(?:and|&)\s*conditions?\b|\ball\s+(?:goods|items|sales)\b)|(?:^(?:store|loc(?:ation)?)\s+(?:#\s*)?\d+\b)|(?:^\$\s*\d+(?:,\d{3})*(?:\.\d{1,2})?\s*$)|(?:^#?[A-Z]{0,3}\d{5,}\/?\s*$)|(?:\bcustomer\s+signature\b|\bagree\s+to\s+pay\b|\bcard\s+issuer\b|\bthank\s+you\b|\bhave\s+a\s+(?:nice|great|good)\b)|(?:^\d{1,2}\/\d{1,2}\/\s*$)|(?:^(?:www\.|https?:\/\/|[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}))|(?:^(?:mastercard|visa|discover|amex|american\s+express)[:\s*x])|(?:^authorization\s+(?:code|amount)\b)|(?:^appr\s+code\b)|(?:^(?:chip\s+ref(?:id)?|tvr:|tsi:|aid:))|(?:^(?:batch\s*#|rrn:|tid:|ref\s*#|bank\s*id)\b)|(?:^[-=─]{2,}\s*(?:page|end|continued|pg\.?)\s*\d*\s*[-=─]*$)/i;
 
 /** Check whether a line looks like a non-product (address, phone, policy…) */
 export function isNonProductLine(line: string): boolean {
@@ -706,8 +758,12 @@ export function parseLineItem(
   }
   // Strip leading line/row number like "1  " or "01. "
   itemName = itemName.replace(/^\d{1,3}[.)\s]+\s*/, "").trim();
-  if (itemName.length < 2)
+  // Reject names shorter than 3 chars, without 3 consecutive alpha chars,
+  // or that look like truncated dates ("12/12/", "11/20")
+  if (itemName.length < 3)
     itemName = trimmed.split(/\s{2,}/)[0] ?? trimmed.slice(0, 40);
+  if (!/[A-Za-z]{3,}/.test(itemName)) return null;
+  if (/^\d{1,2}[\/\-]\d{1,2}[\/\-]?$/.test(itemName)) return null;
 
   // ── Disambiguate quantity, unitPrice, taxAmount using math ─────────────
   let quantity = 1;
