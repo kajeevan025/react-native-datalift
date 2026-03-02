@@ -40,7 +40,7 @@
     "lint": "eslint 'src/**/*.{ts,tsx}'",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf lib/",
-    "publish:github": "npm publish",
+    "publish:github": "npm publish --registry https://npm.pkg.github.com --access public",
     "publish:npm": "npm publish --registry https://registry.npmjs.org --access public",
     "example:android": "cd example && react-native run-android",
     "example:ios": "cd example && react-native run-ios",
@@ -107,10 +107,6 @@
   "engineStrict": true,
   "engines": {
     "node": ">=18.0.0"
-  },
-  "publishConfig": {
-    "registry": "https://npm.pkg.github.com",
-    "access": "public"
   },
   "packageManager": "yarn@1.22.22"
 }
