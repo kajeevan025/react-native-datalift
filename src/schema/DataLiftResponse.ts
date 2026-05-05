@@ -263,27 +263,6 @@ export interface DataLiftExtractOptions {
   /** Custom AI provider key (if multiple registered) */
   aiProvider?: string;
 
-  // ─── LayoutLMv3 on-device model (optional) ────────────────────────────
-
-  /**
-   * Path to LayoutLMv3 ONNX/CoreML model file.
-   * Can be an absolute path, file:// URI, or bare filename (resolved from app bundle).
-   * When set, the model runs after rule-based parsing to enhance extraction.
-   */
-  layoutLMv3ModelPath?: string;
-
-  /**
-   * Path to LayoutLMv3 labels file (JSON or line-per-label format).
-   * Required when `layoutLMv3ModelPath` is set.
-   */
-  layoutLMv3LabelsPath?: string;
-
-  /**
-   * If true, require LayoutLMv3 prediction to succeed (throws on failure).
-   * If false (default), LayoutLMv3 failure is non-fatal.
-   */
-  requireLayoutLMv3?: boolean;
-
   /**
    * Maximum time in milliseconds to wait for the full extraction pipeline.
    * If the timeout is reached a DataLiftExtractError with code "TIMEOUT" is thrown.

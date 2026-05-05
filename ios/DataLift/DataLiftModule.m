@@ -25,41 +25,6 @@ RCT_EXTERN_METHOD(
   reject:(RCTPromiseRejectBlock)reject
 )
 
-RCT_EXTERN_METHOD(
-  extractInvoiceSchema:(NSDictionary *)options
-  resolve:(RCTPromiseResolveBlock)resolve
-  reject:(RCTPromiseRejectBlock)reject
-)
-
-RCT_EXTERN_METHOD(
-  configureLayoutLMv3:(NSDictionary *)options
-  resolve:(RCTPromiseResolveBlock)resolve
-  reject:(RCTPromiseRejectBlock)reject
-)
-
-RCT_EXTERN_METHOD(
-  predictLayoutLMv3:(NSDictionary *)options
-  resolve:(RCTPromiseResolveBlock)resolve
-  reject:(RCTPromiseRejectBlock)reject
-)
-
-RCT_EXTERN_METHOD(
-  checkLayoutLMv3Compatibility:(NSDictionary *)options
-  resolve:(RCTPromiseResolveBlock)resolve
-  reject:(RCTPromiseRejectBlock)reject
-)
-
-RCT_EXTERN_METHOD(
-  getModelStorageDir:(RCTPromiseResolveBlock)resolve
-  reject:(RCTPromiseRejectBlock)reject
-)
-
-RCT_EXTERN_METHOD(
-  downloadModelFile:(NSDictionary *)options
-  resolve:(RCTPromiseResolveBlock)resolve
-  reject:(RCTPromiseRejectBlock)reject
-)
-
 + (BOOL)requiresMainQueueSetup
 {
   return NO;

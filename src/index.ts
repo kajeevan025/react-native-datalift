@@ -12,8 +12,6 @@ export { DataLiftSDK as DataLift } from "./core/DataLift";
 export type {
   DataLiftConfigureOptions,
   DataLiftUnifiedExtractOptions,
-  LayoutLMv3NativeConfig,
-  LayoutLMv3CompatibilityResult,
 } from "./core/DataLift";
 
 // Schema / types
@@ -75,20 +73,6 @@ export type { ValidationResult, DataLiftErrorCode } from "./core";
 // Logger
 export { createLogger, silentLogger } from "./utils/logger";
 export type { DataLiftLogger, LogLevel } from "./utils/logger";
-
-// Model manager – LayoutLMv3 lifecycle (auto-discover, auto-download)
-export {
-  ModelManager,
-  defaultModelManager,
-  MODEL_URLS,
-  MODEL_ASSET_TAG,
-} from "./utils/ModelManager";
-export type {
-  ModelPaths,
-  ModelDownloadProgress,
-  ModelDownloadProgressCallback,
-  EnsureModelOptions,
-} from "./utils/ModelManager";
 
 // Native module bridge
 export {

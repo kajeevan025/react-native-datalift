@@ -57,9 +57,6 @@ dependencies {
     // Google ML Kit - Text Recognition
     implementation "com.google.mlkit:text-recognition:16.0.0"
 
-    // ONNX Runtime Mobile (LayoutLMv3 offline inference)
-    implementation "com.microsoft.onnxruntime:onnxruntime-android:1.19.2"
-
     // PDF rendering
     implementation "com.tom-roush:pdfbox-android:2.0.27.0"
 }
