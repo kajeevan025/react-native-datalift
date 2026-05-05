@@ -8,6 +8,7 @@ module.exports = {
       {
         alias: {
           'react-native-datalift': path.resolve(__dirname, '..', 'src'),
+          'components': path.resolve(__dirname, 'components'),
         },
       },
     ],
