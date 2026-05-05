@@ -1,9 +1,12 @@
 /**
- * DataLift – Canonical response schema
+ * DataLift – Canonical response schema (v1.3.0)
  *
- * This file defines the strongly-typed output contract for every
- * DataLift.extract() call regardless of document type, OCR engine,
- * or AI provider used.
+ * BREAKING CHANGES from v1.2.x:
+ *   - DataLiftBuyer.address is now full DataLiftAddress (was Pick<DataLiftAddress, "fullAddress">)
+ *   - DataLiftMetadata.confidenceBreakdown is now required (was optional)
+ *   - DataLiftTransaction.status field added
+ *   - DataLiftPart.hsn field added
+ *   - DataLiftPaymentDetails.iban and swiftCode fields added
  */
 
 // ─── Address ────────────────────────────────────────────────────────────────
@@ -56,6 +59,10 @@ export interface DataLiftPaymentDetails {
   bankAccount?: string;
   /** Terminal or gateway payment receipt/authorisation number */
   receiptNumber?: string;
+  /** International Bank Account Number (e.g. "GB29 NWBK 6016 1331 9268 19") */
+  iban?: string;
+  /** SWIFT/BIC bank identifier code (e.g. "NWBKGB2L") */
+  swiftCode?: string;
 }
 
 // ─── Delivery Details ────────────────────────────────────────────────────────
@@ -75,6 +82,10 @@ export interface DataLiftDeliveryDetails {
 
 // ─── Coordinates ────────────────────────────────────────────────────────────
 
+/**
+ * @deprecated Reserved for future geocoding support.
+ * Coordinates are defined in schema but never populated by the extraction pipeline.
+ */
 export interface DataLiftCoordinates {
   latitude?: number;
   longitude?: number;
@@ -94,7 +105,8 @@ export interface DataLiftSupplier {
 
 export interface DataLiftBuyer {
   name?: string;
-  address?: Pick<DataLiftAddress, "fullAddress">;
+  /** Full address for buyer — now supports split fields (street/city/state/postal) */
+  address?: DataLiftAddress;
   contact?: Pick<DataLiftContact, "phone" | "email">;
 }
 
@@ -115,6 +127,8 @@ export interface DataLiftTransaction {
   paymentMode?: string;
   paymentTerms?: string;
   currency?: string;
+  /** Document status stamp detected in the document image */
+  status?: "draft" | "issued" | "paid" | "overdue" | "cancelled";
 }
 
 // ─── Part / Line Item ───────────────────────────────────────────────────────
@@ -131,10 +145,13 @@ export interface DataLiftPart {
   unitPrice?: number;
   /** Original list/catalogue price before discount */
   listPrice?: number;
+  /** Per-line-item discount amount */
   discount?: number;
   taxPercentage?: number;
   taxAmount?: number;
   totalAmount: number;
+  /** HSN (Harmonized System of Nomenclature) or SAC code for Indian GST */
+  hsn?: string;
 }
 
 // ─── Totals ─────────────────────────────────────────────────────────────────
@@ -172,8 +189,8 @@ export interface DataLiftMetadata {
   documentType: DataLiftDocumentType | string;
   /** 0–1 overall extraction confidence */
   confidenceScore: number;
-  /** Per-factor confidence breakdown */
-  confidenceBreakdown?: {
+  /** Per-factor confidence breakdown — always populated */
+  confidenceBreakdown: {
     ocr: number;
     fields: number;
     numeric: number;
@@ -266,4 +283,11 @@ export interface DataLiftExtractOptions {
    * If false (default), LayoutLMv3 failure is non-fatal.
    */
   requireLayoutLMv3?: boolean;
+
+  /**
+   * Maximum time in milliseconds to wait for the full extraction pipeline.
+   * If the timeout is reached a DataLiftExtractError with code "TIMEOUT" is thrown.
+   * Default: no timeout.
+   */
+  timeoutMs?: number;
 }

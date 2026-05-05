@@ -1,4 +1,3 @@
-
 /**
  * DataLift – Native ML Kit / Apple Vision OCR Provider
  *
@@ -61,6 +60,13 @@ export class NativeMLKitOCR implements OCRProvider {
       );
     }
 
+    if (!options.imageData || options.imageData.trim().length === 0) {
+      throw new OCRError(
+        "imageData must be a non-empty URI or base64 string",
+        this.name,
+      );
+    }
+
     // The native module expects a file URI, not base64
     // If caller provided base64 we save it to a temp file via the native module helpers.
     // For now we forward imageData assuming it is a URI; base64 path is handled by OCREngine.
@@ -70,10 +76,20 @@ export class NativeMLKitOCR implements OCRProvider {
         language: options.language ?? "en",
       });
 
+      const text = result.text ?? "";
+      // Count only non-empty lines for a meaningful lineCount metric
+      const lineCount =
+        result.lineCount ??
+        text.split("\n").filter((l) => l.trim().length > 0).length;
+      // Clamp confidence to [0, 1]; default to 0.5 (neutral) rather than
+      // an overconfident 0.75 when the native layer doesn't report one.
+      const rawConf = result.confidence ?? 0.5;
+      const confidence = Math.max(0, Math.min(1, rawConf));
+
       return {
-        text: result.text ?? "",
-        confidence: result.confidence ?? 0.85,
-        lineCount: result.lineCount ?? result.text?.split("\n").length ?? 0,
+        text,
+        confidence,
+        lineCount,
         provider: this.name,
       };
     } catch (err) {

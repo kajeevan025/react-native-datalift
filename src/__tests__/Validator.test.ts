@@ -1,4 +1,3 @@
-
 /**
  * DataLift – Validator unit tests
  */
@@ -68,6 +67,13 @@ describe("sanitiseResponse", () => {
       confidenceScore: 0.9,
       extractionTimestamp: "2024-01-01T00:00:00Z",
       languageDetected: "en",
+      confidenceBreakdown: {
+        ocr: 0,
+        fields: 0,
+        numeric: 0,
+        docType: 0,
+        keyword: 0,
+      },
     },
     supplier: { name: "ACME", address: {}, contact: {} },
     buyer: {},

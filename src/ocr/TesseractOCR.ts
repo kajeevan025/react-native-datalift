@@ -1,4 +1,3 @@
-
 /**
  * DataLift – Tesseract.js OCR Provider
  *
@@ -48,6 +47,9 @@ function getTesseract(): TesseractModule | null {
 
 export class TesseractOCR implements OCRProvider {
   readonly name = "tesseract";
+  // Per-language worker cache — avoids re-loading language data on every call
+  private _worker: TesseractWorker | null = null;
+  private _workerLang: string | null = null;
 
   async isAvailable(): Promise<boolean> {
     return getTesseract() !== null;
@@ -63,16 +65,25 @@ export class TesseractOCR implements OCRProvider {
     }
 
     const lang = this.normaliseLang(options.language ?? "en");
-    let worker: TesseractWorker | null = null;
+
+    // Reuse the cached worker when the language is unchanged
+    if (!this._worker || this._workerLang !== lang) {
+      if (this._worker) {
+        await this._worker.terminate().catch(() => undefined);
+        this._worker = null;
+        this._workerLang = null;
+      }
+      const w = await Tesseract.createWorker({ logger: () => undefined });
+      await w.loadLanguage(lang);
+      await w.initialize(lang);
+      this._worker = w;
+      this._workerLang = lang;
+    }
 
     try {
-      worker = await Tesseract.createWorker({ logger: () => undefined });
-      await worker.loadLanguage(lang);
-      await worker.initialize(lang);
-
       const {
         data: { text, confidence },
-      } = await worker.recognize(options.imageData);
+      } = await this._worker.recognize(options.imageData);
 
       const lines = text.split("\n").filter((l) => l.trim().length > 0);
 
@@ -83,19 +94,15 @@ export class TesseractOCR implements OCRProvider {
         provider: this.name,
       };
     } catch (err) {
+      // Invalidate the cached worker on error so it's rebuilt on next call
+      await this._worker.terminate().catch(() => undefined);
+      this._worker = null;
+      this._workerLang = null;
       throw new OCRError(
         `Tesseract recognition failed: ${err instanceof Error ? err.message : String(err)}`,
         this.name,
         err,
       );
-    } finally {
-      if (worker) {
-        try {
-          await worker.terminate();
-        } catch {
-          // ignore cleanup errors
-        }
-      }
     }
   }
 
@@ -111,10 +118,34 @@ export class TesseractOCR implements OCRProvider {
       nl: "nld",
       ja: "jpn",
       zh: "chi_sim",
+      "zh-tw": "chi_tra",
       ko: "kor",
       ar: "ara",
       hi: "hin",
+      ru: "rus",
+      pl: "pol",
+      sv: "swe",
+      da: "dan",
+      no: "nor",
+      fi: "fin",
+      tr: "tur",
+      th: "tha",
+      vi: "vie",
+      uk: "ukr",
+      cs: "ces",
+      ro: "ron",
+      hu: "hun",
+      el: "ell",
+      he: "heb",
     };
-    return map[lang.toLowerCase()] ?? lang;
+    const lower = lang.toLowerCase();
+    const mapped = map[lower];
+    if (!mapped && lower.length > 0) {
+      console.warn(
+        `[DataLift/TesseractOCR] Language code '${lang}' not in language map; ` +
+          `passing raw to Tesseract. Ensure the language data file is available.`,
+      );
+    }
+    return mapped ?? lower;
   }
 }

@@ -1,4 +1,3 @@
-
 /**
  * DataLift – RuleBasedParser unit tests
  *
@@ -302,5 +301,82 @@ describe("RuleBasedParser – Edge cases", () => {
   it("returns empty parts array when no line items found", () => {
     const r = parser.parse("This is just a header\nNo items here");
     expect(Array.isArray(r.parts)).toBe(true);
+  });
+});
+
+// ─── v1.3.0 new feature tests ────────────────────────────────────────────────
+
+describe("RuleBasedParser – invoice status extraction", () => {
+  it("detects PAID status", () => {
+    const r = parser.parse(
+      "TAX INVOICE\nINVOICE NUMBER: INV-001\nStatus: PAID\nTotal: $500.00",
+    );
+    expect(r.transaction.status).toBe("paid");
+  });
+
+  it("detects OVERDUE status", () => {
+    const r = parser.parse(
+      "Invoice INV-002\nOVERDUE\nDue Date: 2024-01-01\nGrand Total: $250.00",
+    );
+    expect(r.transaction.status).toBe("overdue");
+  });
+});
+
+describe("RuleBasedParser – tip and service charge extraction", () => {
+  it("extracts tip from footer", () => {
+    const r = parser.parse(
+      "INVOICE\nItem A   1   $100.00   $100.00\nSubtotal: $100.00\nTip: $10.00\nTotal: $110.00",
+    );
+    expect(r.totals.tip).toBeCloseTo(10);
+  });
+
+  it("extracts service charge", () => {
+    const r = parser.parse(
+      "Invoice\nService Charge: $15.00\nGrand Total: $115.00",
+    );
+    expect(r.totals.serviceCharge).toBeCloseTo(15);
+  });
+});
+
+describe("RuleBasedParser – buyer section boundary", () => {
+  it("stops buyer extraction at invoice section keywords", () => {
+    const text = [
+      "TAX INVOICE",
+      "ACME Corp",
+      "123 Supplier St, Sydney",
+      "Bill To:",
+      "Customer XYZ",
+      "456 Customer Rd",
+      "Invoice Number: INV-999",
+      "Date: 2024-03-01",
+    ].join("\n");
+    const r = parser.parse(text);
+    // Buyer should not include invoice metadata
+    expect(r.buyer.name).toContain("Customer XYZ");
+    expect(r.transaction.invoiceNumber).toBe("INV-999");
+  });
+});
+
+describe("RuleBasedParser – $1M sanity guard", () => {
+  it("accepts line items up to $999,999", () => {
+    const text = [
+      "Description  Qty  Unit Price  Total",
+      "Industrial Equipment  1  450000.00  450000.00",
+      "Grand Total: $450,000.00",
+    ].join("\n");
+    const r = parser.parse(text);
+    const bigItem = r.parts.find(
+      (p) => p.totalAmount && p.totalAmount > 100000,
+    );
+    expect(bigItem).toBeDefined();
+  });
+});
+
+describe("RuleBasedParser – ALL-CAPS supplier (4-char min)", () => {
+  it("matches a 4-character uppercase company name", () => {
+    const r = parser.parse(
+      "ACME\n123 Industrial Ave\nInvoice No: INV-001\nTotal: $100.00",
+    );
+    expect(r.supplier.name).toBe("ACME");
   });
 });

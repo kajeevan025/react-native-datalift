@@ -54,6 +54,7 @@ export interface DataLiftNativeInterface {
   predictLayoutLMv3(options: {
     raw_text: string;
     uris?: string[];
+    image_uri?: string;
     language?: string;
     model_path?: string;
     labels_path?: string;

@@ -31,7 +31,6 @@ import {
 import { DataLift as NativeDataLift } from "../NativeDataLift";
 import { OCREngine, registerOCRProvider } from "../ocr/OCREngine";
 import { AIEngine, registerAIProvider } from "../ai/AIEngine";
-import { HuggingFaceProvider } from "../ai/HuggingFaceProvider";
 import type { OCRProvider } from "../ocr/OCRProvider";
 import type { AIProvider } from "../ai/AIProvider";
 import { RuleBasedParser } from "../parser/RuleBasedParser";
@@ -67,6 +66,11 @@ interface DataLiftConfig {
    * Defaults to the GitHub Releases URL for this package.
    */
   layoutLMv3ModelUrl?: string;
+  /**
+   * Optional progress callback stored globally from configure().
+   * Used when autoDownloadLayoutLMv3 triggers a download during extract().
+   */
+  onModelDownloadProgress?: (progress: ModelDownloadProgress) => void;
 }
 
 const _config: DataLiftConfig = {
@@ -170,6 +174,9 @@ export const DataLiftSDK = {
     if (options.layoutLMv3ModelUrl !== undefined) {
       _config.layoutLMv3ModelUrl = options.layoutLMv3ModelUrl;
     }
+    if (options.onModelDownloadProgress !== undefined) {
+      _config.onModelDownloadProgress = options.onModelDownloadProgress;
+    }
     if (options.ocrProvider) {
       registerOCRProvider(options.ocrProvider);
     }
@@ -192,33 +199,9 @@ export const DataLiftSDK = {
       _layoutLMv3Config.modelPath = result.model_path ?? options.modelPath;
       _layoutLMv3Config.labelsPath = options.labelsPath ?? null;
 
-      // Auto-register a HuggingFaceProvider that delegates to the native bridge
-      const nativeRunner = async (input: {
-        rawText: string;
-        documentType: string;
-        modelId: string;
-      }) => {
-        const prediction = await NativeDataLift.predictLayoutLMv3({
-          raw_text: input.rawText,
-          model_path: _layoutLMv3Config.modelPath ?? undefined,
-          labels_path: _layoutLMv3Config.labelsPath ?? undefined,
-        });
-        return {
-          fields: (prediction.fields ?? {}) as Record<
-            string,
-            string | number | null | undefined
-          >,
-          confidence: prediction.confidence,
-          entities: [],
-        };
-      };
-
-      registerAIProvider(
-        new HuggingFaceProvider({
-          model: "layoutlmv3-native",
-          runner: nativeRunner as any,
-        }),
-      );
+      // NOTE: Removed auto-registration of HuggingFaceProvider — Stage 5.5 in
+      // _extractImpl calls predictLayoutLMv3 directly; registering a provider
+      // here caused a second redundant inference call via Stage 6 (AIEngine).
 
       return result;
     } catch (err) {
@@ -293,6 +276,27 @@ export const DataLiftSDK = {
    * @throws DataLiftExtractError on validation failure or unrecoverable errors
    */
   async extract(options: DataLiftExtractOptions): Promise<DataLiftResponse> {
+    if (options.timeoutMs && options.timeoutMs > 0) {
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(
+          () =>
+            reject(
+              new DataLiftExtractError(
+                `extract() timed out after ${options.timeoutMs}ms`,
+                "TIMEOUT",
+              ),
+            ),
+          options.timeoutMs,
+        ),
+      );
+      return Promise.race([this._extractImpl(options), timeoutPromise]);
+    }
+    return this._extractImpl(options);
+  },
+
+  async _extractImpl(
+    options: DataLiftExtractOptions,
+  ): Promise<DataLiftResponse> {
     const startTime = Date.now();
     const debug = options.debug ?? false;
     const logger = createLogger(debug);
@@ -407,9 +411,13 @@ export const DataLiftSDK = {
           ? { model: _config.layoutLMv3ModelUrl }
           : undefined;
 
+        // Forward the globally configured progress callback to the ModelManager
+        const onProgress = _config.onModelDownloadProgress;
+
         const discovered = await defaultModelManager.ensureModel({
           autoDownload: shouldDownload,
           modelUrls,
+          onProgress,
         });
 
         if (discovered) {
@@ -433,7 +441,7 @@ export const DataLiftSDK = {
           );
           // Kick off the download in the background; don't block this extraction
           defaultModelManager
-            .downloadModel()
+            .downloadModel(onProgress, modelUrls)
             .then((paths) => {
               return this.configureLayoutLMv3({
                 modelPath: paths.modelPath,
@@ -471,10 +479,18 @@ export const DataLiftSDK = {
     if (layoutModelPath) {
       logger.info("LayoutLMv3 model configured – running native prediction");
       try {
+        // Resolve a file URI from imageData so the native engine can load pixel_values
+        const imageUri: string | undefined = imageData.startsWith("file://")
+          ? imageData
+          : imageData.startsWith("/")
+            ? `file://${imageData}`
+            : undefined;
+
         const prediction = await NativeDataLift.predictLayoutLMv3({
           raw_text: ocrResult.text,
           model_path: layoutModelPath,
           labels_path: layoutLabelsPath ?? undefined,
+          image_uri: imageUri,
         });
 
         if (prediction.used && prediction.fields) {
@@ -483,22 +499,49 @@ export const DataLiftSDK = {
             `LayoutLMv3 extracted ${Object.keys(fields).length} fields (conf=${((prediction.confidence ?? 0) * 100).toFixed(0)}%)`,
           );
 
-          // Merge LayoutLMv3 fields into the response (only fill gaps)
-          if (fields.invoice_number && !response.transaction.invoiceNumber) {
-            response.transaction.invoiceNumber = String(fields.invoice_number);
+          // Merge strategy:
+          //   • modelConf >= 0.75 — model can override identifiers/dates (not totals)
+          //   • modelConf <  0.75 — fill-only (only populate empty parser fields)
+          const modelConf = prediction.confidence ?? 0;
+          const canOverride = modelConf >= 0.75;
+
+          // Identifiers & dates — bidirectional when confidence is high
+          if (fields.invoice_number) {
+            if (canOverride || !response.transaction.invoiceNumber) {
+              response.transaction.invoiceNumber = String(
+                fields.invoice_number,
+              );
+            }
           }
-          if (fields.po_number && !response.transaction.purchaseOrderNumber) {
-            response.transaction.purchaseOrderNumber = String(fields.po_number);
+          if (fields.po_number) {
+            if (canOverride || !response.transaction.purchaseOrderNumber) {
+              response.transaction.purchaseOrderNumber = String(
+                fields.po_number,
+              );
+            }
           }
-          if (fields.date_issued && !response.transaction.invoiceDate) {
-            response.transaction.invoiceDate = String(fields.date_issued);
+          if (fields.date_issued) {
+            if (canOverride || !response.transaction.invoiceDate) {
+              response.transaction.invoiceDate = String(fields.date_issued);
+            }
           }
-          if (fields.vendor_name && !response.supplier.name) {
-            response.supplier.name = String(fields.vendor_name);
+          if (fields.due_date) {
+            if (canOverride || !response.transaction.dueDate) {
+              response.transaction.dueDate = String(fields.due_date);
+            }
           }
-          if (fields.buyer_name && !response.buyer.name) {
-            response.buyer.name = String(fields.buyer_name);
+          // Supplier/buyer names — bidirectional when confidence is high
+          if (fields.vendor_name) {
+            if (canOverride || !response.supplier.name) {
+              response.supplier.name = String(fields.vendor_name);
+            }
           }
+          if (fields.buyer_name) {
+            if (canOverride || !response.buyer.name) {
+              response.buyer.name = String(fields.buyer_name);
+            }
+          }
+          // Totals — always fill-only (never override successfully parsed financials)
           const grandTotal =
             typeof fields.grand_total === "number"
               ? fields.grand_total
@@ -550,10 +593,21 @@ export const DataLiftSDK = {
             ocrResult.confidence,
             response.metadata.documentType,
           );
-          response.metadata.confidenceScore = Math.max(
+          const newConfidence = Math.max(
             breakdown.overall,
             postBreakdown.overall,
           );
+          response.metadata.confidenceScore = newConfidence;
+          // Update the breakdown to reflect post-LayoutLMv3 state if it improved
+          if (postBreakdown.overall > breakdown.overall) {
+            response.metadata.confidenceBreakdown = {
+              ocr: postBreakdown.ocr,
+              fields: postBreakdown.fields,
+              numeric: postBreakdown.numeric,
+              docType: postBreakdown.docType,
+              keyword: postBreakdown.keyword,
+            };
+          }
           logger.info(
             `Post-LayoutLMv3 confidence: ${(response.metadata.confidenceScore * 100).toFixed(1)}%`,
           );
@@ -579,30 +633,19 @@ export const DataLiftSDK = {
           ...(response.metadata.warnings ?? []),
           `LayoutLMv3 failed: ${msg}`,
         ];
-        // If the labels file is permanently incompatible, clear the global
-        // configuration so we don't retry with the same bad file on every
-        // subsequent extract() call.
-        if (
-          msg.includes("labels file appears incompatible") ||
-          msg.includes("labels are empty")
-        ) {
-          _layoutLMv3Config.configured = false;
-          _layoutLMv3Config.modelPath = null;
-          _layoutLMv3Config.labelsPath = null;
-          logger.warn(
-            "LayoutLMv3 labels invalid — clearing configuration to prevent repeated failures.",
-          );
-        }
       }
     }
 
     // ── 6. AI enhancement (optional) ────────────────────────────────────────
     const aiThreshold =
       options.aiConfidenceThreshold ?? _config.defaultAIThreshold;
+    // Use post-LayoutLMv3 confidence (in case it improved from the initial rule-based score)
+    const currentConfidence =
+      response.metadata.confidenceScore ?? breakdown.overall;
 
-    if (breakdown.overall < aiThreshold) {
+    if (currentConfidence < aiThreshold) {
       logger.info(
-        `Confidence ${(breakdown.overall * 100).toFixed(0)}% < threshold ${(aiThreshold * 100).toFixed(0)}% – triggering AI`,
+        `Confidence ${(currentConfidence * 100).toFixed(0)}% < threshold ${(aiThreshold * 100).toFixed(0)}% – triggering AI`,
       );
 
       const aiEngine = new AIEngine(logger, options.aiProvider);

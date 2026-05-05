@@ -6,6 +6,7 @@ import ai.onnxruntime.OrtException
 import ai.onnxruntime.OrtSession
 import android.graphics.Bitmap
 import android.graphics.Color
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.nio.FloatBuffer
@@ -47,48 +48,48 @@ class LayoutLMv3OnnxEngine {
     labelsPath: String?,
     text: String,
     image: Bitmap?,
-    maxSeqLen: Int = 128,
+    // 512 matches iOS CoreML shape and avoids truncation with BPE subword tokens
+    maxSeqLen: Int = 512,
     imageSize: Int = 224,
   ): Prediction {
     val modelFile = File(modelPath)
     if (!modelFile.exists()) {
       throw IllegalArgumentException("LayoutLMv3 model file not found: $modelPath")
     }
-    val labelsResolved = labelsPath?.takeIf { it.isNotBlank() }
-      ?: throw IllegalArgumentException("LayoutLMv3 labels file is required for reliable decoding")
-    if (!File(labelsResolved).exists()) {
-      throw IllegalArgumentException("LayoutLMv3 labels file not found: $labelsResolved")
-    }
-
     val session = try {
       getSession(modelPath)
     } catch (e: OrtException) {
       throw IllegalStateException("Failed to load ONNX session: ${e.message}", e)
     }
 
-    val labels = loadLabels(labelsResolved)
-    validateLabelMap(labels)
-    val vocab = loadVocab(modelFile.parentFile)
-    val tokens = text.split("\\s+".toRegex()).filter { it.isNotBlank() }
-
-    val encoded = encodeTokens(tokens, vocab, maxSeqLen)
+    // Load labels — null/missing path falls back to built-in defaults automatically.
+    // If the downloaded file is incompatible, also fall back to defaults so extraction
+    // still runs rather than failing the whole stage.
+    val labelsResolved = labelsPath?.takeIf { it.isNotBlank() }
+    val rawLabels = loadLabels(labelsResolved)
+    val labels = if (isValidLabelMap(rawLabels)) rawLabels else defaultLabels()
+    val bpeVocab = loadVocab(modelFile.parentFile)
+    val encoded = encode(text, bpeVocab, maxSeqLen)
     val pixelValues = imageToTensorData(image, imageSize)
+
+    // Use actual sequence length for ONNX dynamic shapes
+    val actualSeqLen = encoded.inputIds.size.toLong()
 
     val inputs = mutableMapOf<String, OnnxTensor>()
     val inputIdsTensor = OnnxTensor.createTensor(
       getEnv(),
       LongBuffer.wrap(encoded.inputIds),
-      longArrayOf(1, maxSeqLen.toLong()),
+      longArrayOf(1, actualSeqLen),
     )
     val attentionTensor = OnnxTensor.createTensor(
       getEnv(),
       LongBuffer.wrap(encoded.attentionMask),
-      longArrayOf(1, maxSeqLen.toLong()),
+      longArrayOf(1, actualSeqLen),
     )
     val bboxTensor = OnnxTensor.createTensor(
       getEnv(),
       LongBuffer.wrap(encoded.bbox),
-      longArrayOf(1, maxSeqLen.toLong(), 4),
+      longArrayOf(1, actualSeqLen, 4),
     )
     val imageTensor = OnnxTensor.createTensor(
       getEnv(),
@@ -98,8 +99,8 @@ class LayoutLMv3OnnxEngine {
 
     val tokenTypeTensor = OnnxTensor.createTensor(
       getEnv(),
-      LongBuffer.wrap(LongArray(maxSeqLen) { 0L }),
-      longArrayOf(1, maxSeqLen.toLong()),
+      LongBuffer.wrap(LongArray(actualSeqLen.toInt()) { 0L }),
+      longArrayOf(1, actualSeqLen),
     )
 
     try {
@@ -153,6 +154,11 @@ class LayoutLMv3OnnxEngine {
     }
   }
 
+  // ── BPE vocab types ────────────────────────────────────────────────────────
+  private data class MergePair(val a: String, val b: String)
+
+  private data class BPEVocab(val vocab: Map<String, Int>, val mergeRanks: Map<MergePair, Int>)
+
   private data class Encoded(
     val inputIds: LongArray,
     val attentionMask: LongArray,
@@ -160,54 +166,90 @@ class LayoutLMv3OnnxEngine {
     val tokens: List<String>,
   )
 
-  private fun encodeTokens(
-    words: List<String>,
-    vocab: Map<String, Int>,
-    maxSeqLen: Int,
-  ): Encoded {
-    val cls = 101L
-    val sep = 102L
-    val unk = 100L
-    val cleanWords = words.take(max(0, maxSeqLen - 2))
+  /** Encode OCR text using RoBERTa byte-level BPE with line/word-aware bounding boxes. */
+  private fun encode(text: String, bpeVocab: BPEVocab, maxSeqLen: Int): Encoded {
+    val rawLines = text.split("\n")
+    val lines = rawLines.map { line ->
+      line.split(" ").filter { it.isNotBlank() }
+    }.filter { it.isNotEmpty() }
+    val totalLines = max(1, lines.size)
 
-    val seqTokens = mutableListOf("[CLS]")
-    seqTokens.addAll(cleanWords)
-    seqTokens.add("[SEP]")
+    // RoBERTa special IDs: <s>=0  <pad>=1  </s>=2  <unk>=3
+    val bos = 0L
+    val eos = 2L
 
-    val inputIds = LongArray(maxSeqLen) { 0L }
-    val attention = LongArray(maxSeqLen) { 0L }
-    val bbox = LongArray(maxSeqLen * 4) { 0L }
+    val tokenIds   = mutableListOf(bos)
+    val flatBbox   = mutableListOf(0L, 0L, 0L, 0L)
+    val tokenStrs  = mutableListOf("<s>")
 
-    for (i in seqTokens.indices) {
-      val token = seqTokens[i]
-      val tokenId = when (token) {
-        "[CLS]" -> cls
-        "[SEP]" -> sep
-        else -> {
-          val fromVocab = vocab[token.lowercase()]
-          (fromVocab ?: (absStableHash(token) % 30000 + 1000)).toLong()
+    outer@ for ((lineIdx, lineWords) in lines.withIndex()) {
+      val wordsInLine = max(1, lineWords.size)
+      val y0 = (lineIdx * 1000L) / totalLines
+      val y1 = ((lineIdx + 1) * 1000L) / totalLines
+      for ((wordIdx, word) in lineWords.withIndex()) {
+        val x0 = (wordIdx * 1000L) / wordsInLine
+        val x1 = ((wordIdx + 1) * 1000L) / wordsInLine
+        val subtokens = bpeTokenize(word, isFirstWord = wordIdx == 0, bpeVocab = bpeVocab)
+        for (subtoken in subtokens) {
+          if (tokenIds.size >= maxSeqLen - 1) break@outer
+          tokenIds += (bpeVocab.vocab[subtoken] ?: 3).toLong()
+          flatBbox += listOf(x0, y0, x1, y1)
+          tokenStrs += subtoken
         }
       }
-      inputIds[i] = tokenId
-      attention[i] = 1L
-
-      val x0 = 0L
-      val y0 = ((i * 1000L) / max(1, seqTokens.size)).coerceIn(0L, 999L)
-      val x1 = 1000L
-      val y1 = min(1000L, y0 + 10L)
-      val base = i * 4
-      bbox[base] = x0
-      bbox[base + 1] = y0
-      bbox[base + 2] = x1
-      bbox[base + 3] = y1
     }
 
-    return Encoded(
-      inputIds = inputIds,
-      attentionMask = attention,
-      bbox = bbox,
-      tokens = seqTokens,
-    )
+    if (tokenIds.size < maxSeqLen) {
+      tokenIds += eos
+      flatBbox += listOf(0L, 0L, 0L, 0L)
+      tokenStrs += "</s>"
+    }
+
+    val seqLen  = tokenIds.size
+    val ids     = LongArray(maxSeqLen) { 1L }  // pad_id = 1
+    val mask    = LongArray(maxSeqLen) { 0L }
+    val bbox    = LongArray(maxSeqLen * 4) { 0L }
+
+    for (i in 0 until seqLen) {
+      ids[i]          = tokenIds[i]
+      mask[i]         = 1L
+      bbox[i * 4]     = flatBbox[i * 4]
+      bbox[i * 4 + 1] = flatBbox[i * 4 + 1]
+      bbox[i * 4 + 2] = flatBbox[i * 4 + 2]
+      bbox[i * 4 + 3] = flatBbox[i * 4 + 3]
+    }
+
+    return Encoded(inputIds = ids, attentionMask = mask, bbox = bbox, tokens = tokenStrs)
+  }
+
+  /** Byte-level BPE tokeniser. Non-first words in a line get a Ġ (U+0120) prefix. */
+  private fun bpeTokenize(word: String, isFirstWord: Boolean, bpeVocab: BPEVocab): List<String> {
+    if (word.isEmpty()) return emptyList()
+    val prefixed = if (isFirstWord) word else "\u0120$word"
+    if (bpeVocab.vocab.containsKey(prefixed)) return listOf(prefixed)
+
+    val symbols: MutableList<String> = if (isFirstWord) {
+      word.map { it.toString() }.toMutableList()
+    } else {
+      val chars = word.map { it.toString() }.toMutableList()
+      if (chars.isNotEmpty()) chars[0] = "\u0120${chars[0]}"
+      chars
+    }
+    if (symbols.isEmpty()) return emptyList()
+
+    while (symbols.size > 1) {
+      var bestRank = Int.MAX_VALUE
+      var bestIdx  = -1
+      for (i in 0 until symbols.size - 1) {
+        val pair = MergePair(symbols[i], symbols[i + 1])
+        val rank = bpeVocab.mergeRanks[pair] ?: continue
+        if (rank < bestRank) { bestRank = rank; bestIdx = i }
+      }
+      if (bestIdx < 0) break
+      symbols[bestIdx] = symbols[bestIdx] + symbols[bestIdx + 1]
+      symbols.removeAt(bestIdx + 1)
+    }
+    return symbols
   }
 
   private fun imageToTensorData(bitmap: Bitmap?, imageSize: Int): FloatArray {
@@ -256,7 +298,8 @@ class LayoutLMv3OnnxEngine {
       } ?: continue
 
       val labelRaw = labels[labelId] ?: "O"
-      if (labelRaw == "O" || tokens[i].startsWith("[")) continue
+      // Skip RoBERTa special tokens (<s>, </s>, <pad>) and Outside label
+      if (labelRaw == "O" || tokens[i] == "<s>" || tokens[i] == "</s>" || tokens[i] == "<pad>") continue
       if (score.toDouble() < minimumTokenConfidence) continue
       val label = labelRaw.removePrefix("B-").removePrefix("I-")
       val cleaned = sanitizeEntityToken(tokens[i])
@@ -286,7 +329,6 @@ class LayoutLMv3OnnxEngine {
     return merged
   }
 
-  // ::: Code Generated by Copilot a1b2c3d4-e5f6-7890-abcd-ef1234567890. This comment will be removed automatically after the file is saved :::
   private fun entitiesToFields(entities: List<Entity>): Map<String, Any> {
     val fields = mutableMapOf<String, Any>()
     fun setField(key: String, value: Any) { if (!fields.containsKey(key)) fields[key] = value }
@@ -375,15 +417,22 @@ class LayoutLMv3OnnxEngine {
     return raw.replace("[^A-Za-z0-9$.,:/#&()\\-]".toRegex(), "").trim()
   }
 
-  private fun validateLabelMap(labels: Map<Int, String>) {
-    if (labels.isEmpty()) {
-      throw IllegalArgumentException("LayoutLMv3 labels are empty")
-    }
+  /**
+   * Returns true if [labels] is a valid BIO token-classification label map:
+   * must have at least an Outside ("O") label and one or more B- prefixed entities.
+   * Domain-specific keywords are NOT required — any BIO labeled file is accepted.
+   */
+  private fun isValidLabelMap(labels: Map<Int, String>): Boolean {
+    if (labels.isEmpty()) return false
     val normalized = labels.values.map { it.uppercase() }
     val hasOutside = normalized.any { it == "O" }
-    val supportedKeys = listOf("INVOICE", "RECEIPT", "ORDER", "PO", "DATE", "VENDOR", "TOTAL", "DUE")
-    val covered = supportedKeys.count { key -> normalized.any { it.contains(key) } }
-    if (!hasOutside || covered < 3) {
+    val hasBioLabel = normalized.any { it.startsWith("B-") || it.startsWith("I-") }
+    return hasOutside && hasBioLabel
+  }
+
+  // Keep for compatibility — callers that want a throwing variant can use this.
+  private fun validateLabelMap(labels: Map<Int, String>) {
+    if (!isValidLabelMap(labels)) {
       throw IllegalArgumentException(
         "LayoutLMv3 labels file appears incompatible. Provide token-classification labels with O/B-/I- tags for invoice entities.",
       )
@@ -427,49 +476,116 @@ class LayoutLMv3OnnxEngine {
     if (!file.exists()) return defaultLabels()
 
     val text = file.readText()
-    return try {
+
+    // 1. Try JSON object formats:
+    //    a) {"0": "O", "1": "B-INVOICE_NUMBER", ...}  — standard DataLift format
+    //    b) {"id2label": {"0": "O", ...}, ...}          — HuggingFace config.json wrapper
+    try {
       val json = JSONObject(text)
+      val inner: JSONObject = if (json.has("id2label")) json.getJSONObject("id2label") else json
       val map = mutableMapOf<Int, String>()
-      for (key in json.keys()) {
+      for (key in inner.keys()) {
         val k = key.toIntOrNull() ?: continue
-        map[k] = json.optString(key)
+        map[k] = inner.optString(key)
       }
-      if (map.isEmpty()) defaultLabels() else map
-    } catch (_: Exception) {
-      file.readLines().mapIndexedNotNull { index, line ->
-        val trimmed = line.trim()
-        if (trimmed.isEmpty()) null else index to trimmed
-      }.toMap().ifEmpty { defaultLabels() }
-    }
-  }
+      if (map.isNotEmpty()) return map
+    } catch (_: Exception) { /* fall through */ }
 
-  private fun loadVocab(modelDir: File?): Map<String, Int> {
-    if (modelDir == null) return emptyMap()
-    val vocabFile = File(modelDir, "vocab.txt")
-    if (!vocabFile.exists()) return emptyMap()
-    return vocabFile.readLines().mapIndexedNotNull { index, token ->
-      val t = token.trim()
-      if (t.isEmpty()) null else t to index
+    // 2. Try JSON array format: ["O", "B-INVOICE_NUMBER", ...]
+    try {
+      val arr = JSONArray(text)
+      val map = mutableMapOf<Int, String>()
+      for (i in 0 until arr.length()) {
+        val v = arr.optString(i)
+        if (v.isNotBlank()) map[i] = v
+      }
+      if (map.isNotEmpty()) return map
+    } catch (_: Exception) { /* fall through */ }
+
+    // 3. Plain-text fallback: one label per line, strip any residual JSON syntax
+    val lines = file.readLines().mapIndexedNotNull { index, line ->
+      val trimmed = line.trim()
+        .removePrefix("\"")
+        .removeSuffix("\",")
+        .removeSuffix("\"")
+        .trim()
+      if (trimmed.isEmpty() || trimmed == "[" || trimmed == "]") null else index to trimmed
     }.toMap()
+    return lines.ifEmpty { defaultLabels() }
   }
 
+  /** Load RoBERTa vocab.json and merges.txt from model directory. */
+  private fun loadVocab(modelDir: File?): BPEVocab {
+    if (modelDir == null) return BPEVocab(emptyMap(), emptyMap())
+
+    // vocab.json: {"Ġthe": 262, "Ġinvoice": 17208, ...}
+    val vocab = mutableMapOf<String, Int>()
+    val vocabFile = File(modelDir, "vocab.json")
+    if (vocabFile.exists()) {
+      try {
+        val json = JSONObject(vocabFile.readText())
+        for (key in json.keys()) vocab[key] = json.getInt(key)
+      } catch (_: Exception) { /* leave empty */ }
+    }
+
+    // merges.txt: one "a b" pair per line, line index = merge priority
+    val mergeRanks = mutableMapOf<MergePair, Int>()
+    val mergesFile = File(modelDir, "merges.txt")
+    if (mergesFile.exists()) {
+      var rank = 0
+      for (line in mergesFile.readLines()) {
+        val t = line.trim()
+        if (t.startsWith("#") || t.isEmpty()) continue
+        val parts = t.split(" ", limit = 2)
+        if (parts.size == 2) mergeRanks[MergePair(parts[0], parts[1])] = rank++
+      }
+    }
+
+    return BPEVocab(vocab = vocab, mergeRanks = mergeRanks)
+  }
+
+  // ::: Code Generated by Copilot a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d. This comment will be removed automatically after the file is saved :::
+  /** Default label map matching the fine-tuned LayoutLMv3 model in datalift-models/labels.json. */
   private fun defaultLabels(): Map<Int, String> = mapOf(
     0 to "O",
     1 to "B-INVOICE_NUMBER",
     2 to "I-INVOICE_NUMBER",
-    3 to "B-DATE",
-    4 to "I-DATE",
-    5 to "B-VENDOR_NAME",
-    6 to "I-VENDOR_NAME",
-    7 to "B-GRAND_TOTAL",
-    8 to "I-GRAND_TOTAL",
-    9 to "B-AMOUNT_DUE",
-    10 to "I-AMOUNT_DUE",
+    3 to "B-RECEIPT_NUMBER",
+    4 to "I-RECEIPT_NUMBER",
+    5 to "B-DATE",
+    6 to "I-DATE",
+    7 to "B-DUE_DATE",
+    8 to "I-DUE_DATE",
+    9 to "B-VENDOR_NAME",
+    10 to "I-VENDOR_NAME",
+    11 to "B-VENDOR_ADDRESS",
+    12 to "I-VENDOR_ADDRESS",
+    13 to "B-BUYER_NAME",
+    14 to "I-BUYER_NAME",
+    15 to "B-BUYER_ADDRESS",
+    16 to "I-BUYER_ADDRESS",
+    17 to "B-PO_NUMBER",
+    18 to "I-PO_NUMBER",
+    19 to "B-ORDER_NUMBER",
+    20 to "I-ORDER_NUMBER",
+    21 to "B-GRAND_TOTAL",
+    22 to "I-GRAND_TOTAL",
+    23 to "B-SUBTOTAL",
+    24 to "I-SUBTOTAL",
+    25 to "B-TOTAL_TAX",
+    26 to "I-TOTAL_TAX",
+    27 to "B-AMOUNT_DUE",
+    28 to "I-AMOUNT_DUE",
+    29 to "B-ITEM_DESCRIPTION",
+    30 to "I-ITEM_DESCRIPTION",
+    31 to "B-ITEM_QUANTITY",
+    32 to "I-ITEM_QUANTITY",
+    33 to "B-ITEM_UNIT_PRICE",
+    34 to "I-ITEM_UNIT_PRICE",
+    35 to "B-ITEM_TOTAL",
+    36 to "I-ITEM_TOTAL",
+    37 to "B-PAYMENT_METHOD",
+    38 to "I-PAYMENT_METHOD",
   )
 
-  private fun absStableHash(value: String): Int {
-    var hash = 0
-    for (ch in value) hash = 31 * hash + ch.code
-    return kotlin.math.abs(hash)
-  }
 }

@@ -1,4 +1,3 @@
-
 /**
  * DataLift – ConfidenceEngine unit tests
  */
@@ -15,6 +14,13 @@ function makeResponse(overrides?: Partial<DataLiftResponse>): DataLiftResponse {
       confidenceScore: 0,
       extractionTimestamp: new Date().toISOString(),
       languageDetected: "en",
+      confidenceBreakdown: {
+        ocr: 0,
+        fields: 0,
+        numeric: 0,
+        docType: 0,
+        keyword: 0,
+      },
     },
     supplier: {
       name: "ACME Corp",
@@ -106,5 +112,75 @@ describe("ConfidenceEngine", () => {
     expect(breakdown).toHaveProperty("numeric");
     expect(breakdown).toHaveProperty("docType");
     expect(breakdown).toHaveProperty("keyword");
+  });
+});
+
+// ─── v1.3.0 scoring fixes ────────────────────────────────────────────────────
+
+describe("ConfidenceEngine – service invoice scoring (v1.3.0)", () => {
+  it("returns 0.8 numeric score for service invoice (no parts, positive grandTotal)", () => {
+    const serviceInvoice = makeResponse({
+      parts: [],
+      totals: { grandTotal: 500, subtotal: 500 },
+    });
+    const score = engine.score(
+      serviceInvoice,
+      "invoice",
+      0.8,
+      "invoice",
+    ).numeric;
+    expect(score).toBeCloseTo(0.8);
+  });
+
+  it("returns 0.5 numeric score when no parts and no grand total", () => {
+    const emptyInvoice = makeResponse({
+      parts: [],
+      totals: { grandTotal: 0 },
+    });
+    const score = engine.score(emptyInvoice, "", 0.5, "generic").numeric;
+    expect(score).toBeCloseTo(0.5);
+  });
+});
+
+describe("ConfidenceEngine – generic docType scoring (v1.3.0)", () => {
+  it("returns 0.5 docType score for generic document type", () => {
+    const r = makeResponse({
+      metadata: {
+        documentType: "generic",
+        confidenceScore: 0,
+        extractionTimestamp: "",
+        languageDetected: "en",
+        confidenceBreakdown: {
+          ocr: 0,
+          fields: 0,
+          numeric: 0,
+          docType: 0,
+          keyword: 0,
+        },
+      },
+    });
+    const score = engine.score(r, "some text", 0.7, "generic").docType;
+    expect(score).toBeCloseTo(0.5);
+  });
+});
+
+describe("ConfidenceEngine – weighted keyword scoring (v1.3.0)", () => {
+  it("gives higher score when primary keywords match vs secondary only", () => {
+    // Primary keywords for invoice: "invoice", "inv", "bill to" (first 3)
+    const primaryText = "invoice inv bill to";
+    const secondaryText = "due date amount due po number";
+    const pScore = engine.score(
+      makeResponse(),
+      primaryText,
+      0.8,
+      "invoice",
+    ).keyword;
+    const sScore = engine.score(
+      makeResponse(),
+      secondaryText,
+      0.8,
+      "invoice",
+    ).keyword;
+    expect(pScore).toBeGreaterThan(sScore);
   });
 });

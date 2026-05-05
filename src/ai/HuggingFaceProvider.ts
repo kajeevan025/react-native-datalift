@@ -1,4 +1,3 @@
-
 /**
  * DataLift – Offline HuggingFace LayoutLMv3 provider
  *
@@ -124,7 +123,13 @@ export class HuggingFaceProvider implements AIProvider {
     const byLabel = new Map<string, string>();
     for (const entity of entities) {
       const key = entity.label.toLowerCase();
-      if (!byLabel.has(key)) {
+      const existing = byLabel.get(key);
+      // Keep the entity with the highest score (not first-seen)
+      if (
+        !existing ||
+        (entity.score ?? 0) >
+          (entities.find((e) => e.text === existing)?.score ?? 0)
+      ) {
         byLabel.set(key, entity.text.trim());
       }
     }
@@ -138,6 +143,39 @@ export class HuggingFaceProvider implements AIProvider {
       this.readString(fields, ["po_number", "purchase_order_number"]) ??
       byLabel.get("po_number") ??
       byLabel.get("po-number");
+
+    const quoteNo =
+      this.readString(fields, ["quote_number", "quotation_number"]) ??
+      byLabel.get("quote_number") ??
+      byLabel.get("quote-no");
+
+    const invoiceDate =
+      this.readString(fields, ["invoice_date", "date"]) ??
+      byLabel.get("invoice_date");
+
+    const dueDate =
+      this.readString(fields, ["due_date", "payment_due"]) ??
+      byLabel.get("due_date");
+
+    const paymentTerms =
+      this.readString(fields, ["payment_terms", "terms"]) ??
+      byLabel.get("payment_terms");
+
+    const statusRaw =
+      this.readString(fields, ["status", "invoice_status"]) ??
+      byLabel.get("status");
+    type TxStatus = "draft" | "issued" | "paid" | "overdue" | "cancelled";
+    const resolvedStatus = ((s?: string): TxStatus | undefined => {
+      if (!s) return undefined;
+      const lower = s.toLowerCase();
+      if (lower === "paid") return "paid";
+      if (lower === "overdue") return "overdue";
+      if (lower === "draft") return "draft";
+      if (lower === "cancelled" || lower === "canceled" || lower === "void")
+        return "cancelled";
+      if (lower === "issued" || lower === "unpaid") return "issued";
+      return undefined;
+    })(statusRaw);
 
     const supplierName =
       this.readString(fields, ["vendor_name", "supplier_name"]) ??
@@ -171,6 +209,11 @@ export class HuggingFaceProvider implements AIProvider {
         ...partial.transaction,
         invoiceNumber: invoiceNo ?? partial.transaction.invoiceNumber,
         purchaseOrderNumber: poNo ?? partial.transaction.purchaseOrderNumber,
+        quoteNumber: quoteNo ?? partial.transaction.quoteNumber,
+        invoiceDate: invoiceDate ?? partial.transaction.invoiceDate,
+        dueDate: dueDate ?? partial.transaction.dueDate,
+        paymentTerms: paymentTerms ?? partial.transaction.paymentTerms,
+        ...(resolvedStatus ? { status: resolvedStatus } : {}),
       },
       supplier: {
         ...partial.supplier,
@@ -240,7 +283,7 @@ export class HuggingFaceProvider implements AIProvider {
     target: DataLiftResponse,
     src: Partial<DataLiftResponse>,
   ): DataLiftResponse {
-    const result = JSON.parse(JSON.stringify(target)) as DataLiftResponse;
+    const result = structuredClone(target) as DataLiftResponse;
     const resultUnknown = result as unknown as Record<string, unknown>;
     for (const k of Object.keys(src) as Array<keyof DataLiftResponse>) {
       const sv = src[k];

@@ -1,6 +1,6 @@
 {
   "name": "@kajeevan025/react-native-datalift",
-  "version": "1.2.5",
+  "version": "1.4.0",
   "description": "Production-ready document scanner SDK with native OCR, rule-based NLP, and optional AI extraction for React Native",
   "main": "lib/cjs/index.js",
   "module": "lib/esm/index.js",
@@ -20,20 +20,26 @@
     "lib/",
     "android/",
     "ios/",
+    "datalift-models/labels.json",
+    "datalift-models/vocab.json",
+    "datalift-models/merges.txt",
+    "datalift-models/layoutlmv3-base-doc-android.onnx",
     "react-native-datalift.podspec",
     "react-native.config.js",
     "README.md",
     "CHANGELOG.md",
     "LICENSE"
   ],
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "build": "yarn build:cjs && yarn build:esm && yarn build:types",
     "build:cjs": "tsc --project tsconfig.cjs.json",
     "build:esm": "tsc --project tsconfig.esm.json",
     "build:types": "tsc --project tsconfig.types.json",
     "build:watch": "tsc --watch",
-    "model:layoutlmv3:download": "bash ./scripts/download-layoutlmv3-offline.sh",
-    "model:layoutlmv3:prepare": "bash ./scripts/download-layoutlmv3-offline.sh",
+    "model:layoutlmv3:prepare": "bash ./scripts/prepare-model.sh",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
@@ -52,9 +58,15 @@
     "react-native-image-picker": "^5.4.0"
   },
   "peerDependenciesMeta": {
-    "react": { "optional": false },
-    "react-native": { "optional": false },
-    "react-native-image-picker": { "optional": true }
+    "react": {
+      "optional": false
+    },
+    "react-native": {
+      "optional": false
+    },
+    "react-native-image-picker": {
+      "optional": true
+    }
   },
   "optionalDependencies": {
     "tesseract.js": "^5.0.0"

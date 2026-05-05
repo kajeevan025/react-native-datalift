@@ -1,4 +1,3 @@
-
 /**
  * DataLift – DataLiftSDK integration tests
  *
@@ -189,5 +188,34 @@ describe("DataLiftSDK.configure()", () => {
     expect(() =>
       DataLift.configure({ aiConfidenceThreshold: 0.8 }),
     ).not.toThrow();
+  });
+});
+
+// ─── v1.3.0 feature tests ────────────────────────────────────────────────────
+
+describe("DataLiftSDK.extract() – timeoutMs (v1.3.0)", () => {
+  it("resolves normally when extraction completes within timeout", async () => {
+    await expect(
+      DataLift.extract({
+        image: "test",
+        ocrProvider: "mock-ocr",
+        timeoutMs: 30000,
+      }),
+    ).resolves.toBeDefined();
+  });
+});
+
+describe("DataLiftSDK.extract() – confidenceBreakdown always present (v1.3.0)", () => {
+  it("confidenceBreakdown is always populated with 5 factor keys", async () => {
+    const result = await DataLift.extract({
+      image: "test",
+      ocrProvider: "mock-ocr",
+    });
+    expect(result.metadata.confidenceBreakdown).toBeDefined();
+    expect(result.metadata.confidenceBreakdown).toHaveProperty("ocr");
+    expect(result.metadata.confidenceBreakdown).toHaveProperty("fields");
+    expect(result.metadata.confidenceBreakdown).toHaveProperty("numeric");
+    expect(result.metadata.confidenceBreakdown).toHaveProperty("docType");
+    expect(result.metadata.confidenceBreakdown).toHaveProperty("keyword");
   });
 });

@@ -1,4 +1,4 @@
-
+// Exported for testing; not intended as a primary public API symbol
 export const UNIFIED_DOC_TYPES = new Set([
   "invoice",
   "receipt",
@@ -91,7 +91,14 @@ export function toIsoDate(value: unknown): string | undefined {
 export function toNumber(value: unknown): number | undefined {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value === "string") {
-    const parsed = parseFloat(value.replace(/[^0-9.-]/g, ""));
+    // Handle European locale format: "1.234,56" → 1234.56
+    const europeanRx = /^-?\d{1,3}(?:\.\d{3})*,\d{1,4}$/;
+    if (europeanRx.test(value.trim())) {
+      const normalised = value.replace(/\./g, "").replace(",", ".");
+      const n = parseFloat(normalised);
+      return Number.isNaN(n) ? undefined : n;
+    }
+    const parsed = parseFloat(value.replace(/[^0-9.\-]/g, ""));
     return Number.isNaN(parsed) ? undefined : parsed;
   }
   return undefined;

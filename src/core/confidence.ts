@@ -33,14 +33,78 @@ const IMPORTANT_TRANSACTION_FIELDS: Array<
 
 // ─── Document-type keyword hints ─────────────────────────────────────────────
 
+// Primary keywords (weight 2×) are placed first; secondary keywords (weight 1×) follow.
+// Separator: all items up to and including the last item that contains common secondary
+// terms; use split at primaryCount.
+const PRIMARY_KEYWORD_COUNT: Record<string, number> = {
+  invoice: 3, // "invoice", "inv", "bill to"
+  receipt: 3, // "receipt", "thank you", "cash"
+  purchase_order: 3,
+  work_order: 3,
+  bill: 3,
+  quote: 3,
+  cmms: 3,
+};
+
 const DOCUMENT_KEYWORDS: Record<string, string[]> = {
-  invoice: ["invoice", "inv", "bill to", "due date", "amount due", "po number"],
-  receipt: ["receipt", "thank you", "cash", "change", "subtotal", "purchase"],
-  purchase_order: ["purchase order", "p.o.", "po#", "ship to", "ordered by"],
-  work_order: ["work order", "wo#", "technician", "labour", "asset"],
-  bill: ["bill", "account number", "billing period", "pay by", "statement"],
-  quote: ["quotation", "quote", "estimate", "valid until", "proposal"],
-  cmms: ["cmms", "maintenance", "work request", "asset id", "breakdown"],
+  invoice: [
+    "invoice",
+    "inv",
+    "bill to",
+    "due date",
+    "amount due",
+    "po number",
+    "tax invoice",
+  ],
+  receipt: [
+    "receipt",
+    "thank you",
+    "cash",
+    "change",
+    "subtotal",
+    "purchase",
+    "change due",
+  ],
+  purchase_order: [
+    "purchase order",
+    "p.o.",
+    "po#",
+    "ship to",
+    "ordered by",
+    "vendor",
+  ],
+  work_order: [
+    "work order",
+    "wo#",
+    "technician",
+    "labour",
+    "asset",
+    "job number",
+  ],
+  bill: [
+    "bill",
+    "account number",
+    "billing period",
+    "pay by",
+    "statement",
+    "meter",
+  ],
+  quote: [
+    "quotation",
+    "quote",
+    "estimate",
+    "valid until",
+    "proposal",
+    "expiry",
+  ],
+  cmms: [
+    "cmms",
+    "maintenance",
+    "work request",
+    "asset id",
+    "breakdown",
+    "failure",
+  ],
 };
 
 // ─── Confidence Engine ────────────────────────────────────────────────────────
@@ -82,6 +146,13 @@ export class ConfidenceEngine {
       docType * WEIGHT_DOC_TYPE +
       keyword * WEIGHT_KEYWORD;
 
+    if (overall < 0.1) {
+      console.warn(
+        `[DataLift] Suspiciously low confidence score (${overall.toFixed(3)}). ` +
+          "OCR quality may be poor or document type may be unrecognised.",
+      );
+    }
+
     return {
       overall: parseFloat(overall.toFixed(4)),
       ocr: parseFloat(ocr.toFixed(4)),
@@ -96,8 +167,11 @@ export class ConfidenceEngine {
 
   private scoreOCR(text: string, providerConf: number): number {
     const words = text.split(/\s+/).filter(Boolean);
-    const densityScore = Math.min(words.length / 50, 1.0); // ≥50 words → full score
-    return providerConf * 0.6 + densityScore * 0.4;
+    // ≥20 words → full density score (receipts are short; 50 was too strict)
+    const densityScore = Math.min(words.length / 20, 1.0);
+    // Clamp providerConf to [0, 1] in case upstream OCR returns out-of-range values
+    const clampedConf = Math.max(0, Math.min(1, providerConf));
+    return clampedConf * 0.6 + densityScore * 0.4;
   }
 
   private scoreFieldPopulation(response: DataLiftResponse): number {
@@ -135,7 +209,13 @@ export class ConfidenceEngine {
     const totals = response.totals;
     const parts = response.parts;
 
-    if (!totals || !parts || parts.length === 0) return 0.5; // neutral
+    // Service invoices (no line items) with a grand total are valid — score 0.8 neutral
+    if (!parts || parts.length === 0) {
+      if (totals?.grandTotal && totals.grandTotal > 0) return 0.8;
+      return 0.5;
+    }
+
+    if (!totals) return 0.5;
 
     // Check: sum of part totals ≈ subtotal
     const partSum = parts.reduce(
@@ -159,10 +239,13 @@ export class ConfidenceEngine {
 
     if (grandTotal === 0) return 0.5;
 
-    const delta = Math.abs(reconstructed - grandTotal) / grandTotal;
+    const absDiff = Math.abs(reconstructed - grandTotal);
+    const delta = absDiff / grandTotal;
 
-    if (delta < 0.01) return 1.0; // within 1%
-    if (delta < 0.05) return 0.8; // within 5%
+    // Accept within 1% OR within $0.10 absolute (handles rounding on small invoices)
+    if (delta < 0.01 || absDiff < 0.1) return 1.0;
+    // Accept within 5% OR within $1.00 absolute (handles minor OCR digit errors)
+    if (delta < 0.05 || absDiff < 1.0) return 0.8;
     if (delta < 0.15) return 0.6; // within 15%
     return 0.3;
   }
@@ -175,6 +258,12 @@ export class ConfidenceEngine {
       response.metadata?.documentType ?? documentType
     ).toLowerCase();
     const detected = documentType.toLowerCase();
+
+    // "generic" means we have no strong signal — always return 0.5 regardless
+    // of whether claimed === detected (two unknowns don’t confirm each other)
+    if (detected === "generic" || claimed === "generic") {
+      return 0.5;
+    }
 
     if (claimed === detected) return 1.0;
 
@@ -190,7 +279,16 @@ export class ConfidenceEngine {
 
     if (keywords.length === 0) return 0.5;
 
-    const matched = keywords.filter((kw) => lower.includes(kw)).length;
-    return matched / keywords.length;
+    const primaryCount = PRIMARY_KEYWORD_COUNT[documentType.toLowerCase()] ?? 0;
+    let weightedMatched = 0;
+    let weightedTotal = 0;
+
+    keywords.forEach((kw, idx) => {
+      const weight = idx < primaryCount ? 2 : 1;
+      weightedTotal += weight;
+      if (lower.includes(kw)) weightedMatched += weight;
+    });
+
+    return weightedTotal > 0 ? weightedMatched / weightedTotal : 0;
   }
 }

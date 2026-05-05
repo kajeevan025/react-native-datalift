@@ -57,6 +57,10 @@ docs/
 DataSet/
 assets/models/
 
+# Large model binaries (downloaded at runtime via autoDownloadLayoutLMv3)
+datalift-models/*.onnx
+datalift-models/onnx/
+
 # Example app artifacts
 example/output/
 example/ios/build/
@@ -67,3 +71,7 @@ example/android/build/
 
 # Instructions
 .github/instructions/wmt-copilot.instructions.md
+
+# Local dev context (not part of plugin)
+SKILL.md
+claude.md

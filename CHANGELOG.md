@@ -5,6 +5,51 @@ All notable changes to `react-native-datalift` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] — 2026-04-12
+
+### Fixed — Extraction accuracy (54 issues resolved across 7 files)
+
+#### `src/parser/primitives.ts`
+
+- **EU currency parsing** (`parseAmount`) — `"€1.234,56"` previously stripped all non-digit/period chars to `"1.23456"` (wrong). Now uses a last-separator heuristic: whichever of `,` or `.` appears last is the decimal. `"1.234,56"` → `1234.56`; `"1,234.56"` → `1234.56`; `"1,234"` (3 digits after comma, no period) → `1234` (thousands separator).
+- **`extractLabeledAmount` EU amounts** — updated all three amount-capture sites to call `parseAmount()`. Widened same-line capture group to match both US and EU decimal formats.
+- **`extractFirstAmount` EU format** — added explicit EU-format match tried before bare-decimal fallback.
+- **`PATTERNS.PHONE` missing separator** — inter-group separator now zero-or-more so `+61(03)9009-1234` (no space after country code) extracts correctly.
+- **`PATTERNS.ABN_BARE` compact format** — spaces optional so `51824753556` recognised alongside `51 824 753 556`.
+- **`extractPhones` false positives** — non-international numbers now require ≥8 stripped digits; date-shaped strings filtered out.
+
+#### `src/core/confidence.ts`
+
+- **Numeric consistency — scale-adaptive tolerance** — absolute difference also checked: `delta < 1% OR absDiff < $0.10` → 1.0; `delta < 5% OR absDiff < $1.00` → 0.8. Prevents small invoices from being harshly penalised for rounding.
+- **OCR density threshold** — lowered from 50 → 20 words (thermal/POS receipts are short).
+- **OCR confidence clamping** — provider confidence clamped to `[0, 1]`.
+
+#### `src/parser/RuleBasedParser.ts`
+
+- **Description lookahead false consumption** — next line not consumed as a description if it contains 2+ consecutive digits, a currency symbol+digit, or a price decimal (`XX.XX`). Prevents item rows from being silently swallowed.
+- **PO number — space-only delimiter** — new fallback catches `PO <value>` with space separator, but only when the value contains at least one digit (avoids capturing column-header word "Number").
+
+#### `src/ocr/NativeMLKitOCR.ts`
+
+- **Default confidence** — fallback when native layer omits confidence lowered from `0.75` → `0.5`.
+- **Confidence clamping** — raw native confidence clamped to `[0, 1]`.
+- **`lineCount` empty lines** — empty/whitespace-only lines filtered before counting.
+
+### Fixed — Example app (`example/App.tsx`)
+
+- **`autoDownloadLayoutLMv3`** — was hardcoded `false` (iOS never got the AI model). Now `Platform.OS !== "android"`: Android uses bundled ONNX, iOS downloads CoreML on first run.
+- **Language detection** — removed hardcoded `language: "en"`; SDK now auto-detects from document content.
+- **`debug` logging** — `debug: __DEV__` added to `configure()` and `extract()`.
+- **Line items expand** — `slice(0, 8)` replaced with a "Show all N items" toggle button. Item descriptions shown on second line.
+- **Delivery address** — `address` object now renders `fullAddress` string, not `[object Object]`.
+
+### Added
+
+- `scripts/sync-models.sh` — one-command model-artifact sync from `datalift-model-training/dist/models/`
+- `INTEGRATION.md` — full integration guide: artifacts table, 39-label schema, pipeline diagram, Android/iOS model resolution
+
+---
+
 ## [1.2.5] — 2026-03-02
 
 ### Fixed — Real-world parser accuracy (92/92 ground-truth tests)

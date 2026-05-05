@@ -1,10 +1,20 @@
 /**
- * DataLift – Rule-based parser foundation (v3)
+ * DataLift – Rule-based parser foundation (v3.1 — v1.3.0)
  *
  * High-accuracy shared utilities for all document parsers.
- * Supports AU, US, UK, IN document formats.
+ * Supports AU, US, UK, IN, EU document formats.
  * Enhanced OCR normalization and line-item extraction accuracy.
  * No external dependencies – pure TypeScript.
+ *
+ * v1.3.0 changes:
+ *  - Fixed global regex .lastIndex bug in extractLabeledAmount()
+ *  - Fixed SKU_BARE pattern to allow single-letter prefix (B-123-456)
+ *  - Added IBAN, SWIFT, HSN, SAC, GSTIN extraction
+ *  - Added invoice status detection (PAID/OVERDUE/DRAFT/CANCELLED)
+ *  - Improved language detection (requires ≥2 English-specific keywords)
+ *  - Added tip/gratuity/service charge extraction
+ *  - Added per-line-item discount extraction in parseLineItem()
+ *  - Expanded tracking number patterns (UPS, FedEx, AusPost)
  */
 
 import type {
@@ -59,8 +69,9 @@ export function normaliseOCRText(raw: string): string {
 export const PATTERNS = {
   // International phone: handles +61 3 9000 1234, (03) 9000-1234, +1 800 555 0100
   // Use [ \t] instead of \s to prevent matching across newlines (e.g. zip\narea-code)
+  // Inter-group separator is optional (*) to handle "+61(03)9009-1234" without space after country code.
   PHONE:
-    /(?:\+\d{1,3}[ \t\-.]?)(?:\(?\d{1,4}\)?[ \t\-.]){1,4}\d{2,6}|(?:\(?\d{2,4}\)?[ \t\-.]?\d{3,4}[ \t\-.]?\d{3,4})/,
+    /(?:\+\d{1,3}[ \t\-.]?)(?:\(?\d{1,4}\)?[ \t\-.]*){1,4}\d{2,6}|(?:\(?\d{2,4}\)?[ \t\-.]?\d{3,4}[ \t\-.]?\d{3,4})/,
 
   // Emails
   EMAIL: /[\w.+\-]+@[\w\-]+\.[\w.]{2,}/i,
@@ -90,7 +101,7 @@ export const PATTERNS = {
 
   // Australian Business Number: 51 824 753 556 or 51824753556
   ABN: /\bABN[\s:#.]*(\d{2}\s?\d{3}\s?\d{3}\s?\d{3})\b/i,
-  ABN_BARE: /\b(\d{2}\s\d{3}\s\d{3}\s\d{3})\b/,
+  ABN_BARE: /\b(\d{2}\s?\d{3}\s?\d{3}\s?\d{3})\b/,
 
   // Australian Company Number
   ACN: /\bACN[\s:#.]*(\d{3}\s?\d{3}\s?\d{3})\b/i,
@@ -111,14 +122,32 @@ export const PATTERNS = {
   // SKU / Part number – label-prefixed
   SKU_LABELED:
     /(?:SKU|Part\s*(?:No|#)|Item\s*(?:No|#)|PN|Catalog\s*(?:No|#))[\s:.]*([A-Z0-9][A-Z0-9\-_.]{2,})/i,
-  // SKU – standalone code pattern (e.g. STL-ANG-50505)
-  SKU_BARE: /\b([A-Z]{2,6}-[A-Z0-9]{2,}-[A-Z0-9]{2,})\b/,
+  // SKU – standalone code pattern (e.g. STL-ANG-50505 or B-123-456)
+  SKU_BARE: /\b([A-Z]{1,6}-[A-Z0-9]{2,}-[A-Z0-9]{2,})\b/,
 
   // Tax percentage on a line item: 10%, GST 10
   TAX_PERCENT: /\b(\d{1,3}(?:\.\d{1,2})?)\s*(?:%|percent|pct)\b/i,
 
   // Unit of measure — common values that follow a quantity
   UOM: /\b(ea(?:ch)?|pcs?|piece(?:s)?|units?|kg|grams?|m(?:etre(?:s)?)?|litre(?:s)?|ltr|hr(?:s)?|hour(?:s)?|day(?:s)?|set(?:s)?|bo(?:x|xes)|roll(?:s)?|pair(?:s)?|pkt(?:s)?|packet(?:s)?|bag(?:s)?|sqm|m2|m3|lm|tin(?:s)?|ctn(?:s)?|carton(?:s)?|dozen(?:s)?)\b/i,
+
+  // IBAN: up to 34 alphanumeric chars (2-letter country code + 2 check digits + BBAN)
+  // Handles both compact (GB29NWBK60161331926819) and spaced (GB29 NWBK 6016 ...) formats
+  IBAN: /\b(?:IBAN|International\s+Bank\s+Account)[\s:#.]*([A-Z]{2}\d{2}(?:\s?[A-Z0-9]{1,4}){1,8})\b/i,
+
+  // SWIFT / BIC code: 8 or 11 alphanumeric characters
+  SWIFT:
+    /\b(?:SWIFT|BIC|Swift\s*Code|BIC\s*Code)[\s:#.]*([A-Z]{4}[A-Z]{2}[A-Z0-9]{2}(?:[A-Z0-9]{3})?)\b/i,
+
+  // HSN code (Indian Harmonized System of Nomenclature): 4–8 digit code
+  HSN: /\b(?:HSN|HSN\s*Code|HSN\s*No)[\s:.#]*([0-9]{4,8})\b/i,
+
+  // SAC code (Indian Service Accounting Code): 6 digit code
+  SAC: /\b(?:SAC|SAC\s*Code|SAC\s*No)[\s:.#]*([0-9]{6})\b/i,
+
+  // Invoice status keywords
+  INVOICE_STATUS:
+    /\b(paid|unpaid|overdue|draft|issued|cancelled|canceled|void(?:ed)?)\b/i,
 };
 
 // ─── Currency detection ───────────────────────────────────────────────────────
@@ -151,11 +180,52 @@ export function detectCurrency(text: string): CurrencyInfo {
 
 // ─── Amount extraction ────────────────────────────────────────────────────────
 
-/** Parse a raw string like "$1,234.56" or "1 234.56" to a float */
+/**
+ * Parse a raw string like "$1,234.56", "€1.234,56" (EU), or "1 234.56" to a float.
+ *
+ * Handles both:
+ *  - US/AU/UK format: period = decimal, comma = thousands  ("1,234.56" → 1234.56)
+ *  - EU format: comma = decimal, period = thousands        ("1.234,56" → 1234.56)
+ *
+ * Detection heuristic: whichever separator (`,` or `.`) appears LAST is the
+ * decimal separator.  Exception: if a lone comma is followed by exactly three
+ * digits with no period present it is treated as a US thousands separator
+ * ("1,234" → 1234, not 1.234).
+ */
 export function parseAmount(raw: string | undefined | null): number {
   if (raw == null) return 0;
-  const cleaned = String(raw).replace(/[^0-9.]/g, "");
-  const n = parseFloat(cleaned);
+  const s = String(raw).trim();
+
+  // Strip currency symbols, spaces, and other non-numeric characters
+  // but keep digits, commas, and periods so we can inspect separators.
+  const stripped = s.replace(/[^0-9.,]/g, "");
+  if (!stripped) return 0;
+
+  const lastComma = stripped.lastIndexOf(",");
+  const lastPeriod = stripped.lastIndexOf(".");
+
+  if (lastComma > lastPeriod) {
+    // Comma comes after the last period → comma is the decimal separator (EU format)
+    // Exception: "1,234" (no period, exactly 3 digits after comma) → US thousands sep
+    const afterLastComma = stripped.slice(lastComma + 1);
+    if (
+      lastPeriod === -1 &&
+      afterLastComma.length === 3 &&
+      /^\d{3}$/.test(afterLastComma)
+    ) {
+      // Treat comma as thousands separator: "1,234" → 1234
+      return parseFloat(stripped.replace(/,/g, "")) || 0;
+    }
+    // EU decimal: strip all periods (thousands separators), replace last comma with period
+    const withoutThousands = stripped.replace(/\./g, "");
+    const normalized = withoutThousands.replace(/,([^,]*)$/, ".$1");
+    const n = parseFloat(normalized);
+    return isNaN(n) ? 0 : n;
+  }
+
+  // Period is the decimal separator (US/AU/standard) — strip commas and spaces
+  const normalized = stripped.replace(/,/g, "");
+  const n = parseFloat(normalized);
   return isNaN(n) ? 0 : n;
 }
 
@@ -167,31 +237,49 @@ export function extractLabeledAmount(
   // Wrap label in (?:...) so | alternation inside labelPattern doesn't break capture groups.
   // Also skip optional parenthesized content like (8%) between label and amount.
 
-  // 1. Same-line match: "Subtotal  $349.72" or "Tax (8%)  $7.73"
-  // The integer alternative [\d,]{2,} uses a negative lookahead to avoid
-  // matching the day portion of dates like "12/07/2023".
+  // 1. Same-line match: "Subtotal  $349.72", "Tax (8%)  $7.73", or EU "Total  €1.234,56"
+  // Capture group accepts:
+  //   US/AU: "1,234.56"  → \d[\d,]*\.\d+
+  //   EU:    "1.234,56"  → \d[\d.]*,\d{1,4}
+  //   plain integer:     → \d[\d,]{1,} (with no-date lookahead)
+  // Use negative lookbehind to avoid partial-word matches (e.g. 'total' inside 'Subtotal')
   const sameLineRx = new RegExp(
-    `(?:${labelPattern})(?:\\s*\\([^)]*\\))?[\\s\\-:]*[A-Z$€£₹¥]*\\s*([\\d,]+\\.\\d+|[\\d,]{2,}(?![/\\-]))`,
+    `(?<![a-zA-Z])(?:${labelPattern})(?:\\s*\\([^)]*\\))?[\\s\\-:]*[A-Z$€£₹¥]*\\s*([\\d][\\d,.]*[\\d])`,
     "i",
   );
   const slM = text.match(sameLineRx);
   if (slM?.[1]) {
-    const n = parseFloat(slM[1].replace(/,/g, ""));
+    const n = parseAmount(slM[1]);
     if (!isNaN(n) && n >= 0) return n;
   }
 
   // 2. Multi-line match: label on its own line, value on following 1-4 lines.
   //    Common in POS / thermal-printer OCR where every field is one line.
-  const labelRx = new RegExp(`(?:${labelPattern})`, "gi");
+  const labelRx = new RegExp(`(?<![a-zA-Z])(?:${labelPattern})`, "gi");
+  const columnLayoutLabels =
+    /^(?:sub[\s\-]*total|subtotal|total\s+tax|tax\s+for|credit\s*card|amount\s+due|balance\s+due|total\s+due|grand\s+total|amount\s+paid|total|gst|vat|shipping|freight|discount)\b/i;
   const lines = text.split("\n");
   for (let i = 0; i < lines.length; i++) {
     if (!labelRx.test(lines[i])) continue;
     // Check if the label line already has a number after the label
     const afterLabel = lines[i].replace(labelRx, "");
-    const inlineNum = afterLabel.match(/[\$€£₹¥]?\s*([\d,]+\.\d{1,4})/);
+    // Accept US "1,234.56" and EU "1.234,56" formats
+    const inlineNum = afterLabel.match(/[\$€£₹¥]?\s*([\d][\d,.]*[\d])/);
     if (inlineNum?.[1]) {
-      const n = parseFloat(inlineNum[1].replace(/,/g, ""));
-      if (!isNaN(n) && n > 0) return n;
+      const n = parseAmount(inlineNum[1]);
+      if (!isNaN(n) && n >= 0) return n;
+    }
+    // Detect column-separated layout: if the next OR previous non-empty line
+    // is also a known financial label without a value, skip the simple lookahead
+    // and let the column-separated handler (step 3) deal with it.
+    const nextLineTrimmed = (lines[i + 1] ?? "").trim();
+    const prevLineTrimmed = (lines[i - 1] ?? "").trim();
+    const isColumnLayout =
+      (columnLayoutLabels.test(nextLineTrimmed) && !/\d+\.\d/.test(nextLineTrimmed)) ||
+      (columnLayoutLabels.test(prevLineTrimmed) && !/\d+\.\d/.test(prevLineTrimmed));
+    if (isColumnLayout) {
+      labelRx.lastIndex = 0;
+      continue;
     }
     // Look ahead up to 4 lines for a standalone monetary amount
     for (let j = i + 1; j < Math.min(i + 5, lines.length); j++) {
@@ -204,25 +292,99 @@ export function extractLabeledAmount(
         )
       )
         break;
-      // Match a standalone amount (optionally with currency symbol)
-      const amtM = trimJ.match(/^[\$€£₹¥]?\s*([\d,]+\.\d{1,4})\s*$/);
+      // Match a standalone amount (optionally with currency symbol) — US or EU format
+      const amtM = trimJ.match(/^[\$€£₹¥]?\s*([\d][\d,.]*[\d]|\d)\s*$/);
       if (amtM?.[1]) {
-        const n = parseFloat(amtM[1].replace(/,/g, ""));
-        if (!isNaN(n) && n > 0) return n;
+        const n = parseAmount(amtM[1]);
+        if (!isNaN(n) && n >= 0) return n;
       }
     }
     // Reset lastIndex for global regex
     labelRx.lastIndex = 0;
   }
 
+  // 3. Column-separated layout: labels in left column, amounts in right column.
+  //    OCR may serialize these as consecutive label-only lines then consecutive amounts.
+  //    Detect this pattern and map labels to amounts positionally.
+  const knownTotalLabels = [
+    "sub-total", "sub total", "subtotal",
+    "total tax", "tax for invoice", "tax", "gst", "vat",
+    "credit card", "amount due", "balance due", "total due",
+    "grand total", "amount paid", "paid", "total",
+    "shipping", "freight", "delivery", "discount",
+  ];
+  const labelPositionRx = new RegExp(`(?<![a-zA-Z])(?:${labelPattern})`, "i");
+  for (let i = 0; i < lines.length; i++) {
+    if (!labelPositionRx.test(lines[i])) continue;
+    // Check: does this label line have NO numeric amount on it?
+    const hasAmount = /\d+\.\d{1,4}/.test(lines[i].replace(labelPositionRx, ""));
+    if (hasAmount) continue;
+    // Look BACKWARDS to find the start of the label block
+    let blockStart = i;
+    while (blockStart > 0) {
+      const prevTrim = lines[blockStart - 1].trim().toLowerCase().replace(/[:\s]+$/, "");
+      if (knownTotalLabels.some((l) => prevTrim.includes(l)) && !/\d+\.\d/.test(lines[blockStart - 1])) {
+        blockStart--;
+      } else {
+        break;
+      }
+    }
+    // Build the full label block from blockStart forward
+    const labelBlock: string[] = [];
+    let k = blockStart;
+    while (k < lines.length) {
+      const kTrim = lines[k].trim().toLowerCase().replace(/[:\s]+$/, "");
+      const isLabelLine = knownTotalLabels.some((l) => kTrim.includes(l)) && !/\d+\.\d/.test(lines[k]);
+      if (isLabelLine) {
+        labelBlock.push(kTrim);
+        k++;
+      } else {
+        break;
+      }
+    }
+    if (labelBlock.length < 2) continue; // not a column-separated block
+    // Now k points at the first non-label line; collect amounts after the block
+    // (skip non-numeric filler like "U.S. Dollars")
+    const amounts: number[] = [];
+    for (let j = k; j < Math.min(k + labelBlock.length + 3, lines.length); j++) {
+      const amtM = lines[j].trim().match(/^[\$€£₹¥]?\s*([\d][\d,.]*[\d]|\d)\s*$/);
+      if (amtM?.[1]) {
+        const n = parseAmount(amtM[1]);
+        if (!isNaN(n)) amounts.push(n);
+      }
+    }
+    const targetIdx = labelBlock.findIndex((lb) => labelPositionRx.test(lb));
+    if (targetIdx >= 0 && targetIdx < amounts.length) {
+      // When labels and amounts have 1:1 alignment, trust all positions.
+      // When counts differ (some labels have no amount), only trust the first
+      // label (index 0) — later positions may be shifted by the missing value.
+      if (amounts.length === labelBlock.length || targetIdx === 0) {
+        return amounts[targetIdx];
+      }
+    }
+    break;
+  }
+
   return undefined;
 }
 
 export function extractFirstAmount(text: string): number | undefined {
-  const m = text.match(/[^\d]*([\d,]+\.\d{1,4})/);
-  const amountText = m?.[1];
-  if (amountText) {
-    const n = parseFloat(amountText.replace(/,/g, ""));
+  // Try US/AU format first: "1,234.56"
+  const usMatch = text.match(/(\d{1,3}(?:,\d{3})*\.\d{1,4})/);
+  if (usMatch?.[1]) {
+    const n = parseAmount(usMatch[1]);
+    if (!isNaN(n) && n > 0) return n;
+  }
+  // Try EU format: "1.234,56" or "1234,56" (comma as decimal, 1-2 digits after)
+  const euMatch = text.match(/(\d{1,3}(?:\.\d{3})*,\d{1,4})/);
+  if (euMatch?.[1]) {
+    const n = parseAmount(euMatch[1]);
+    if (!isNaN(n) && n > 0) return n;
+  }
+  // Bare decimal
+  const bareMatch = text.match(/(\d+\.\d{1,4})/);
+  if (bareMatch?.[1]) {
+    const n = parseFloat(bareMatch[1]);
     if (!isNaN(n) && n > 0) return n;
   }
   return undefined;
@@ -232,9 +394,14 @@ export function extractFirstAmount(text: string): number | undefined {
 
 /** Normalise various date strings to ISO YYYY-MM-DD where possible */
 function normaliseDateString(raw: string): string {
+  // Helper: reject implausible years (part numbers like "3325" or "0090")
+  const validYear = (y: number) => y >= 1970 && y <= 2099;
+
   // Already ISO – validate range, swap day/month if month is out of range
   if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
     const [y, mStr, dStr] = raw.split("-");
+    const yr = parseInt(y, 10);
+    if (!validYear(yr)) return raw; // reject garbage like "3325-27-90"
     const m = parseInt(mStr, 10);
     const d = parseInt(dStr, 10);
     if (m >= 1 && m <= 12 && d >= 1 && d <= 31) return raw;
@@ -249,6 +416,7 @@ function normaliseDateString(raw: string): string {
     const a = parseInt(ymd[2], 10);
     const b = parseInt(ymd[3], 10);
     const year = ymd[1];
+    if (!validYear(parseInt(year, 10))) return raw; // reject garbage like part numbers
     // a > 12 means it must be a day (YYYY-DD-MM layout)
     if (a > 12 && b >= 1 && b <= 12)
       return `${year}-${ymd[3].padStart(2, "0")}-${ymd[2].padStart(2, "0")}`;
@@ -263,6 +431,7 @@ function normaliseDateString(raw: string): string {
     const a = parseInt(dmy[1], 10);
     const b = parseInt(dmy[2], 10);
     const year = dmy[3];
+    if (!validYear(parseInt(year, 10))) return raw; // reject garbage like "27-90-3325"
     // Unambiguous: a > 12 means it HAS to be the day (DD/MM/YYYY)
     if (a > 12 && b >= 1 && b <= 12)
       return `${year}-${dmy[2].padStart(2, "0")}-${dmy[1].padStart(2, "0")}`;
@@ -283,7 +452,8 @@ function normaliseDateString(raw: string): string {
       return `${year}-${dmy2[2].padStart(2, "0")}-${dmy2[1].padStart(2, "0")}`;
     if (b > 12 && a >= 1 && a <= 12)
       return `${year}-${dmy2[1].padStart(2, "0")}-${dmy2[2].padStart(2, "0")}`;
-    // Ambiguous: default US convention MM/DD/YY for North American receipts
+    // Ambiguous 2-digit year: keep MM/DD/YY default (most 2-digit-year receipts are North American
+    // POS slips; 4-digit-year documents already default to DD/MM/YYYY above).
     return `${year}-${dmy2[1].padStart(2, "0")}-${dmy2[2].padStart(2, "0")}`;
   }
 
@@ -356,9 +526,18 @@ export function extractPhones(text: string): string[] {
     new Set(
       found
         .map((p) => p.trim())
-        .filter((p) => p.replace(/\D/g, "").length >= 7)
+        // Require at least 7 digits (rejects short codes); 10+ for non-international numbers
+        .filter((p) => {
+          const digits = p.replace(/\D/g, "");
+          // International numbers (start with +) need ≥7 digits
+          if (p.startsWith("+")) return digits.length >= 7;
+          // Local numbers need ≥8 digits to avoid zip codes and short IDs
+          return digits.length >= 8;
+        })
         // Reject US ZIP+4 codes (e.g. 29651-1500) that look like phone numbers
-        .filter((p) => !/^\d{5}-\d{4}$/.test(p)),
+        .filter((p) => !/^\d{5}-\d{4}$/.test(p))
+        // Reject pure date-like strings (e.g. "12/07/2023" matched as phone)
+        .filter((p) => !/^\d{1,2}[\/.-]\d{1,2}[\/.-]\d{2,4}$/.test(p)),
     ),
   );
 }
@@ -481,9 +660,15 @@ export function extractTaxInformation(
   const acnMatch = text.match(PATTERNS.ACN);
   if (acnMatch?.[1]) ti.acnNumber = acnMatch[1].replace(/\s+/g, " ").trim();
 
-  // GST (AU)
-  const gstMatch = text.match(PATTERNS.GST_AU);
-  if (gstMatch) ti.gstNumber = gstMatch[1].trim();
+  // GSTIN (Indian) – check before generic GST_AU to avoid false-positive
+  const gstinMatch = text.match(PATTERNS.GSTIN);
+  if (gstinMatch) {
+    ti.gstNumber = gstinMatch[1];
+  } else {
+    // GST (AU)
+    const gstMatch = text.match(PATTERNS.GST_AU);
+    if (gstMatch) ti.gstNumber = gstMatch[1].trim();
+  }
 
   // EIN (US)
   const einMatch = text.match(PATTERNS.EIN);
@@ -492,10 +677,6 @@ export function extractTaxInformation(
   // VAT (EU)
   const vatMatch = text.match(PATTERNS.VAT);
   if (vatMatch?.[1]) ti.vatNumber = vatMatch[1].replace(/\s/g, "");
-
-  // GSTIN (India)
-  const gstinMatch = text.match(PATTERNS.GSTIN);
-  if (gstinMatch) ti.gstNumber = gstinMatch[1];
 
   return Object.keys(ti).length > 0 ? ti : undefined;
 }
@@ -550,8 +731,17 @@ export function buildBuyer(block: string): DataLiftBuyer {
     .split("\n")
     .map((l) => l.trim())
     .filter(Boolean);
-  const phones = extractPhones(block);
+  // Strip card-terminal / NFC payment noise lines before phone extraction
+  // to prevent codes like "TVR: 0400008000" being parsed as phone numbers.
+  const terminalNoise =
+    /^(?:tvr:|tsi:|aid:|rrn:|tid:|approved\b|appr(?:oved)?\s+code|chip\s+ref|amount\s+\$?\d)/i;
+  const cleanPhoneBlock = block
+    .split("\n")
+    .filter((l) => !terminalNoise.test(l.trim()))
+    .join("\n");
+  const phones = extractPhones(cleanPhoneBlock);
   const emails = extractEmails(block);
+  // v1.3.0: use full DataLiftAddress (not just fullAddress)
   const address = parseAddress(block);
 
   // Patterns that are section labels, not buyer names
@@ -559,8 +749,9 @@ export function buildBuyer(block: string): DataLiftBuyer {
     /^(bill\s*to|billed\s*to|customer|buyer|sold\s*to|ship\s*to|deliver\s*to|attn|attention|client|account\s*(?:name|holder)|purchaser|customer\s*(?:name|details?|info(?:rmation)?))\s*[:.]?\s*$/i;
 
   // Inline-label pattern: "Customer Name: John Smith" or "Bill To: Acme Inc"
+  // Negative lookahead prevents "CUSTOMER CODE:" from being treated as a buyer label.
   const inlineLabelRx =
-    /^(?:bill\s*to|billed\s*to|customer(?:\s*name)?|buyer|sold\s*to|ship\s*to|deliver\s*to|attn|attention|client|account\s*(?:name|holder)|purchaser)\s*[:.]\s*(.+)/i;
+    /^(?:bill\s*to|billed\s*to|customer(?!\s+(?:code|id|number|#|type|account|ref))(?:\s*name)?|buyer|sold\s*to|ship\s*to|deliver\s*to|attn|attention|client|account\s*(?:name|holder)|purchaser)\s*[:.]\s*(.+)/i;
 
   let name: string | undefined;
 
@@ -594,7 +785,8 @@ export function buildBuyer(block: string): DataLiftBuyer {
 
   return {
     name,
-    address: { fullAddress: address.fullAddress ?? lines.join(", ") },
+    // v1.3.0: pass full address object (not just Pick<DataLiftAddress, "fullAddress">)
+    address,
     contact: {
       phone: phones[0],
       email: emails[0],
@@ -617,7 +809,7 @@ const HEADER_LINE_RX =
  * Catches addresses, phone numbers, store IDs, return policies, boilerplate, etc.
  */
 const NON_PRODUCT_LINE_RX =
-  /(?:^(?:\d+\s+)?(?:po\s*box|p\.?o\.?\s*box)\b)|(?:\b\d+\s+\w+\s+(?:street|st\.?|road|rd\.?|avenue|ave\.?|boulevard|blvd\.?|drive|dr\.?|lane|ln\.?|way|court|ct\.?|place|pl\.?|circle|cir\.?|terrace|ter\.?|highway|hwy\.?|pike|route|rte\.?)\b)|(?:\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?\s+[A-Z]{2}\s+\d{5}(?:-\d{4})?\b)|(?:^\(?\d{3}\)?[\s.\-]*\d{3}[\s.\-]*\d{4}\s*$)|(?:^\(?\d{3}\)?[\s.\-]*\d{3}[\s.\-]*$)|(?:\bwe\s+(?:gladly\s+)?accept|\breturn\s*(?:s|ed)?\s+(?:for|within|policy)|\brefund\b|\bwarranty\b|\bterms?\s*(?:and|&)\s*conditions?\b|\ball\s+(?:goods|items|sales)\b)|(?:^(?:store|loc(?:ation)?)\s+(?:#\s*)?\d+\b)|(?:^\$\s*\d+(?:,\d{3})*(?:\.\d{1,2})?\s*$)|(?:^#?[A-Z]{0,3}\d{5,}\/?\s*$)|(?:\bcustomer\s+signature\b|\bagree\s+to\s+pay\b|\bcard\s+issuer\b|\bthank\s+you\b|\bhave\s+a\s+(?:nice|great|good)\b)|(?:^\d{1,2}\/\d{1,2}\/\s*$)|(?:^(?:www\.|https?:\/\/|[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}))|(?:^(?:mastercard|visa|discover|amex|american\s+express)[:\s*x])|(?:^authorization\s+(?:code|amount)\b)|(?:^appr\s+code\b)|(?:^(?:chip\s+ref(?:id)?|tvr:|tsi:|aid:))|(?:^(?:batch\s*#|rrn:|tid:|ref\s*#|bank\s*id)\b)|(?:^[-=─]{2,}\s*(?:page|end|continued|pg\.?)\s*\d*\s*[-=─]*$)/i;
+  /(?:^(?:\d+\s+)?(?:po\s*box|p\.?o\.?\s*box)\b)|(?:\b\d+\s+\w+\s+(?:street|st\.?|road|rd\.?|avenue|ave\.?|boulevard|blvd\.?|drive|dr\.?|lane|ln\.?|way|court|ct\.?|place|pl\.?|circle|cir\.?|terrace|ter\.?|highway|hwy\.?|pike|route|rte\.?)\b)|(?:\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?\s+[A-Z]{2}\s+\d{5}(?:-\d{4})?\b)|(?:^\(?\d{3}\)?[\s.\-]*\d{3}[\s.\-]*\d{4}\s*$)|(?:^\(?\d{3}\)?[\s.\-]*\d{3}[\s.\-]*$)|(?:\bwe\s+(?:gladly\s+)?accept|\breturn\s*(?:s|ed)?\s+(?:for|within|policy)|\brefund\b|\bwarranty\b|\bterms?\s*(?:and|&)\s*conditions?\b|\ball\s+(?:goods|items|sales)\b)|(?:^(?:store|loc(?:ation)?)\s+(?:#\s*)?\d+\b)|(?:^\$\s*\d+(?:,\d{3})*(?:\.\d{1,2})?\s*$)|(?:^#?[A-Z]{0,3}\d{5,}\/?\s*$)|(?:\bcustomer\s+signature\b|\bagree\s+to\s+pay\b|\bcard\s+issuer\b|\bthank\s+you\b|\bhave\s+a\s+(?:nice|great|good)\b)|(?:^\d{1,2}\/\d{1,2}\/\s*$)|(?:^(?:www\.|https?:\/\/|[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}))|(?:^(?:mastercard|visa|discover|amex|american\s+express)[:\s*x])|(?:^authorization\s+(?:code|amount)\b)|(?:^appr\s+code\b)|(?:^(?:chip\s+ref(?:id)?|tvr:|tsi:|aid:|rrn:|approved\b))|(?:^(?:batch\s*#|rrn:|tid:|ref\s*#|bank\s*id)\b)|(?:^[-=─]{2,}\s*(?:page|end|continued|pg\.?)\s*\d*\s*[-=─]*$)|(?:^\d+\.?\d*\s+discount\s+each\b)|(?:^\d+\s+@\s+\$?\d+\.\d)|(?:^cryptogram\b)|(?:^incoterms\b)|(?:^application:\s)|(?:^name:\s)/i;
 
 /** Check whether a line looks like a non-product (address, phone, policy…) */
 export function isNonProductLine(line: string): boolean {
@@ -638,12 +830,22 @@ export function parseLineItem(
   _lineNum: number,
   defaultTaxPct?: number,
 ): DataLiftPart | null {
-  const trimmed = line.trim();
+  let trimmed = line.trim();
   if (!trimmed || trimmed.length < 4) return null;
   if (SUMMARY_LINE_RX.test(trimmed)) return null;
   if (HEADER_LINE_RX.test(trimmed) && !/\d/.test(trimmed)) return null;
   // Filter out addresses, phone numbers, policy text, store IDs, etc.
   if (isNonProductLine(trimmed)) return null;
+
+  // ── Strip leading retail SKU (5-7 digit store code before description) ──
+  // Pattern: "61702   HM 1-CT 3/4-IN FLAT WASHE    8.60"
+  // The leading number is the store SKU — extract and remove from numeric parsing.
+  let retailSku: string | undefined;
+  const retailSkuM = trimmed.match(/^(\d{5,7})\s{2,}([A-Za-z])/);
+  if (retailSkuM) {
+    retailSku = retailSkuM[1];
+    trimmed = trimmed.slice(retailSkuM[1].length).trimStart();
+  }
 
   // ── Extract all numeric tokens with their positions ────────────────────
   interface NumToken {
@@ -663,6 +865,11 @@ export function parseLineItem(
     const decPart = m[4] ? "." + m[4] : "";
     const v = parseFloat(intPart + decPart);
     if (!isNaN(v) && v > 0) {
+      // Skip numbers that are part of fractions like "1/4", "3/8", "1/2"
+      // (common in product names for pipe/fitting dimensions).
+      const charBefore = trimmed[m.index - 1] ?? "";
+      const charAfter = trimmed[m.index + m[0].length] ?? "";
+      if (charBefore === "/" || charAfter === "/") continue;
       numTokens.push({
         value: v,
         index: m.index,
@@ -859,16 +1066,41 @@ export function parseLineItem(
     );
   }
 
+  // Extract discount on this line item: (-12.50) or "DISC 5.00" or ($2.00)
+  let discount: number | undefined;
+  const discParenM = trimmed.match(/\(\s*[\$€£₹¥]?\s*([\d,]+\.\d{1,4})\s*\)/);
+  if (discParenM?.[1]) {
+    discount = parseFloat(discParenM[1].replace(/,/g, ""));
+  } else {
+    const discLabelM = trimmed.match(
+      /\b(?:disc(?:ount)?|rebate|savings?)[\s:#]?\s*-?([\d,]+\.\d{1,4})/i,
+    );
+    if (discLabelM?.[1]) discount = parseFloat(discLabelM[1].replace(/,/g, ""));
+  }
+
+  // Extract HSN/SAC code if present on this line
+  let hsn: string | undefined;
+  const hsnM = trimmed.match(PATTERNS.HSN);
+  if (hsnM?.[1]) hsn = hsnM[1];
+  else {
+    const sacM = trimmed.match(PATTERNS.SAC);
+    if (sacM?.[1]) hsn = sacM[1];
+  }
+
   return {
     itemName,
-    sku,
+    // retailSku takes priority over inline SKU patterns
+    sku: retailSku ?? sku,
+    partNumber: retailSku ?? sku,
     unit,
     quantity: isNaN(quantity) ? 1 : quantity,
     unitPrice:
       unitPrice !== undefined ? parseFloat(unitPrice.toFixed(4)) : undefined,
+    discount,
     taxPercentage,
     taxAmount,
     totalAmount: parseFloat(totalAmount.toFixed(4)),
+    hsn,
   };
 }
 
@@ -956,6 +1188,19 @@ export function classifyDocumentType(text: string): DataLiftDocumentType {
   ]);
   check("contract", ["contract", "agreement", "whereas", "parties", "signed"]);
 
+  // Strong "invoice" signal: if "invoice" appears in the first ~200 characters
+  // (title/header area), boost its score and dampen purchase_order if warranted.
+  if (/\binvoice\b/i.test(text.slice(0, 200))) scores.invoice += 2;
+  if (/\bbill\s+to\b/i.test(lower)) scores.invoice += 1;
+  // If both "invoice" (title) and "po number" (column header) are in the text, the
+  // document is almost certainly a supplier invoice that happens to reference a PO.
+  if (
+    /\bpo\s+(?:number|#)\b/i.test(lower) &&
+    /\binvoice\b/i.test(text.slice(0, 150))
+  ) {
+    scores.purchase_order = Math.max(0, scores.purchase_order - 2);
+  }
+
   const best = (
     Object.entries(scores) as Array<[DataLiftDocumentType, number]>
   ).reduce((a, b) => (b[1] > a[1] ? b : a));
@@ -1026,13 +1271,24 @@ export function extractPaymentDetails(
     if (refM?.[1]) pd.reference = refM[1].trim();
   }
 
+  // IBAN
+  const ibanM = text.match(PATTERNS.IBAN);
+  if (ibanM?.[1]) pd.iban = ibanM[1].replace(/\s+/g, " ").trim();
+
+  // SWIFT / BIC
+  const swiftM = text.match(PATTERNS.SWIFT);
+  if (swiftM?.[1]) pd.swiftCode = swiftM[1].trim();
+
   return Object.keys(pd).length > 0 ? pd : undefined;
 }
 
 // ─── Delivery details extraction ─────────────────────────────────────────────────────
 
 const TRACKING_NO_RX =
-  /(?:tracking\s*(?:no\.?|#|number)|consignment\s*(?:no\.?|#)|track\s*&\s*trace)\s*[:#.]?\s*([A-Z0-9][\w\-]{4,30})/i;
+  /(?:tracking\s*(?:no\.?|#|number|num\.?)|track\s+(?:no\.?|#|number)|consignment\s*(?:no\.?|#)|track\s*&\s*trace)[\s:#.]*([A-Z0-9][\w\-]{4,30})/i;
+// Extended carrier tracking formats: UPS (1Z...), FedEx (12-22 digits), AusPost (8-13 digits barcode)
+const TRACKING_FORMAT_RX =
+  /\b(1Z[A-Z0-9]{16}|\d{12,22}|[0-9]{8}(?:[0-9]{5})?)\b/;
 const CARRIER_RX =
   /\b(auspost|australia\s+post|fedex|fed\s*ex|dhl|ups|tnt|startrack|star\s+track|toll|fastway|couriers?\s+please|allied\s+express|hunter\s+express|sendle|aramex|border\s+express)\b/i;
 
@@ -1058,7 +1314,28 @@ export function extractDeliveryDetails(
 
   // Tracking / consignment number
   const trackM = text.match(TRACKING_NO_RX);
-  if (trackM?.[1]) dd.trackingNumber = trackM[1].trim();
+  if (trackM?.[1]) {
+    dd.trackingNumber = trackM[1].trim();
+  } else {
+    // Fallback: detect UPS/FedEx/AusPost format tracking numbers near tracking keywords
+    const trackFmtM = text.match(
+      /(?:tracking|track|consign).*?\n?.*?(1Z[A-Z0-9]{16}|\d{12,22})/i,
+    );
+    if (trackFmtM?.[1]) dd.trackingNumber = trackFmtM[1].trim();
+    else {
+      // Last resort: look for standalone tracking format near carrier name
+      const carrierCtx = text.match(CARRIER_RX);
+      if (carrierCtx) {
+        const carrierIdx = text.indexOf(carrierCtx[0]);
+        const nearby = text.slice(
+          Math.max(0, carrierIdx - 200),
+          carrierIdx + 200,
+        );
+        const fmtM = nearby.match(TRACKING_FORMAT_RX);
+        if (fmtM?.[1]) dd.trackingNumber = fmtM[1];
+      }
+    }
+  }
 
   // Carrier
   const carrierM = text.match(CARRIER_RX);
@@ -1100,13 +1377,12 @@ export function extractNotes(text: string): string | undefined {
 
 export function detectLanguage(text: string): string {
   const s = text.slice(0, 800).toLowerCase();
-  // English — expanded to cover business-document vocabulary (avoiding cross-language words like total/date/description)
-  if (
-    /\b(the|and|for|with|from|this|that|are|have|not|invoice|receipt|payment|shipping|price|quantity|amount|order|discount|street|phone|terms)\b/.test(
-      s,
-    )
-  )
-    return "en";
+  // English — require at least 2 matches from business-document vocabulary
+  // to avoid false-positive for Spanish/French when only connective words appear.
+  const enKws =
+    /(the|and|for|with|from|this|that|are|have|not|invoice|receipt|payment|shipping|price|quantity|amount|order|discount|street|phone|terms)/g;
+  const enMatches = (s.match(enKws) ?? []).length;
+  if (enMatches >= 2) return "en";
   if (/\b(le|la|les|de|du|un|une|avec|pour|pas)\b/.test(s)) return "fr";
   if (/\b(der|die|das|und|für|mit|nicht|ein|eine)\b/.test(s)) return "de";
   if (/\b(el|la|los|de|del|un|una|con|para|que)\b/.test(s)) return "es";

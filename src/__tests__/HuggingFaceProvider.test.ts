@@ -24,6 +24,13 @@ function dummyRequest(
         languageDetected: "en",
         confidenceScore: 0.5,
         extractionTimestamp: new Date().toISOString(),
+        confidenceBreakdown: {
+          ocr: 0,
+          fields: 0,
+          numeric: 0,
+          docType: 0,
+          keyword: 0,
+        },
       },
     },
     documentType: "invoice",

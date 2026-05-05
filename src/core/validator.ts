@@ -1,4 +1,3 @@
-
 /**
  * DataLift – Input & output validation layer
  *
@@ -76,12 +75,22 @@ export function sanitiseResponse(response: DataLiftResponse): DataLiftResponse {
     metadata: {
       documentType: response.metadata?.documentType ?? "generic",
       confidenceScore: response.metadata?.confidenceScore ?? 0,
+      // confidenceBreakdown is now required — always provide zero defaults
+      confidenceBreakdown: {
+        ocr: response.metadata?.confidenceBreakdown?.ocr ?? 0,
+        fields: response.metadata?.confidenceBreakdown?.fields ?? 0,
+        numeric: response.metadata?.confidenceBreakdown?.numeric ?? 0,
+        docType: response.metadata?.confidenceBreakdown?.docType ?? 0,
+        keyword: response.metadata?.confidenceBreakdown?.keyword ?? 0,
+      },
       extractionTimestamp:
         response.metadata?.extractionTimestamp ?? new Date().toISOString(),
       languageDetected: response.metadata?.languageDetected ?? "en",
+      fieldCount: response.metadata?.fieldCount,
       ocrProvider: response.metadata?.ocrProvider,
       aiProviderUsed: response.metadata?.aiProviderUsed,
       processingTimeMs: response.metadata?.processingTimeMs,
+      pageCount: response.metadata?.pageCount,
       warnings: response.metadata?.warnings,
     },
     supplier: {
@@ -111,6 +120,8 @@ export function sanitiseResponse(response: DataLiftResponse): DataLiftResponse {
       invoiceNumber: response.transaction?.invoiceNumber,
       purchaseOrderNumber: response.transaction?.purchaseOrderNumber,
       quoteNumber: response.transaction?.quoteNumber,
+      referenceNumber: response.transaction?.referenceNumber,
+      workOrderNumber: response.transaction?.workOrderNumber,
       invoiceDate: response.transaction?.invoiceDate,
       dueDate: response.transaction?.dueDate,
       transactionDate: response.transaction?.transactionDate,
@@ -118,6 +129,7 @@ export function sanitiseResponse(response: DataLiftResponse): DataLiftResponse {
       paymentMode: response.transaction?.paymentMode,
       paymentTerms: response.transaction?.paymentTerms,
       currency: response.transaction?.currency ?? "USD",
+      status: response.transaction?.status,
     },
     parts: (response.parts ?? []).map((p) => ({
       itemName: p.itemName ?? "",
@@ -128,10 +140,12 @@ export function sanitiseResponse(response: DataLiftResponse): DataLiftResponse {
       quantity: p.quantity ?? 1,
       unit: p.unit,
       unitPrice: p.unitPrice,
+      listPrice: p.listPrice,
       discount: p.discount,
       taxPercentage: p.taxPercentage,
       taxAmount: p.taxAmount,
       totalAmount: p.totalAmount ?? 0,
+      hsn: p.hsn,
     })),
     totals: {
       subtotal: response.totals?.subtotal,
@@ -144,6 +158,29 @@ export function sanitiseResponse(response: DataLiftResponse): DataLiftResponse {
       balanceDue: response.totals?.balanceDue,
       grandTotal: response.totals?.grandTotal ?? 0,
     },
+    paymentDetails: response.paymentDetails
+      ? {
+          method: response.paymentDetails.method,
+          reference: response.paymentDetails.reference,
+          cardType: response.paymentDetails.cardType,
+          cardLast4: response.paymentDetails.cardLast4,
+          bankBsb: response.paymentDetails.bankBsb,
+          bankAccount: response.paymentDetails.bankAccount,
+          receiptNumber: response.paymentDetails.receiptNumber,
+          iban: response.paymentDetails.iban,
+          swiftCode: response.paymentDetails.swiftCode,
+        }
+      : undefined,
+    deliveryDetails: response.deliveryDetails
+      ? {
+          address: response.deliveryDetails.address,
+          date: response.deliveryDetails.date,
+          trackingNumber: response.deliveryDetails.trackingNumber,
+          carrier: response.deliveryDetails.carrier,
+          shippingMethod: response.deliveryDetails.shippingMethod,
+        }
+      : undefined,
+    notes: response.notes,
     rawText: response.rawText,
   };
 }

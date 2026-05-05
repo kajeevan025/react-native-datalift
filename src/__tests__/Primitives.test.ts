@@ -1,4 +1,3 @@
-
 /**
  * DataLift – Parser Primitives unit tests
  */
@@ -225,5 +224,87 @@ describe("parseLineItem", () => {
 
   it("returns null for lines without amounts", () => {
     expect(parseLineItem("This is just a heading", 1)).toBeNull();
+  });
+});
+
+// ─── v1.3.0 feature tests ─────────────────────────────────────────────────────
+
+import { PATTERNS, extractPaymentDetails } from "../parser/primitives";
+
+describe("PATTERNS.IBAN", () => {
+  it("matches a valid IBAN label", () => {
+    const m = "IBAN: GB29 NWBK 6016 1331 9268 19".match(PATTERNS.IBAN);
+    expect(m).not.toBeNull();
+    expect(m![1]).toContain("GB29");
+  });
+
+  it("does not match a plain number", () => {
+    expect("Account: 12345678".match(PATTERNS.IBAN)).toBeNull();
+  });
+});
+
+describe("PATTERNS.SWIFT", () => {
+  it("matches a SWIFT code", () => {
+    const m = "SWIFT: NWBKGB2L".match(PATTERNS.SWIFT);
+    expect(m).not.toBeNull();
+    expect(m![1]).toBe("NWBKGB2L");
+  });
+});
+
+describe("PATTERNS.HSN", () => {
+  it("matches HSN code", () => {
+    const m = "HSN Code: 84733099".match(PATTERNS.HSN);
+    expect(m).not.toBeNull();
+    expect(m![1]).toBe("84733099");
+  });
+});
+
+describe("PATTERNS.INVOICE_STATUS", () => {
+  it("matches paid status", () => {
+    expect(
+      "Status: PAID".match(PATTERNS.INVOICE_STATUS)![1].toLowerCase(),
+    ).toBe("paid");
+  });
+  it("matches overdue status", () => {
+    expect("OVERDUE".match(PATTERNS.INVOICE_STATUS)![1].toLowerCase()).toBe(
+      "overdue",
+    );
+  });
+});
+
+describe("parseLineItem – discount extraction", () => {
+  it("extracts parenthetical discount", () => {
+    const item = parseLineItem("Widget A   2   $10.00   ($2.00)   $18.00", 1);
+    expect(item).not.toBeNull();
+    expect(item!.discount).toBeCloseTo(2.0);
+  });
+});
+
+describe("parseLineItem – HSN extraction", () => {
+  it("extracts HSN code from line", () => {
+    const item = parseLineItem("Steel Rod HSN: 7214499 1 500.00 500.00", 1);
+    expect(item).not.toBeNull();
+    expect(item!.hsn).toBe("7214499");
+  });
+});
+
+describe("extractLabeledAmount – multi-label alternation bug", () => {
+  it("extracts all labels in sequence without lastIndex bleed", () => {
+    const text = "Subtotal: $100.00\nTax: $10.00\nTotal: $110.00";
+    expect(extractLabeledAmount(text, "subtotal")).toBeCloseTo(100);
+    expect(extractLabeledAmount(text, "tax")).toBeCloseTo(10);
+    expect(extractLabeledAmount(text, "total")).toBeCloseTo(110);
+    // Call again to confirm no lastIndex state bleed
+    expect(extractLabeledAmount(text, "subtotal")).toBeCloseTo(100);
+  });
+});
+
+describe("extractPaymentDetails – IBAN and SWIFT", () => {
+  it("extracts IBAN from text", () => {
+    const pd = extractPaymentDetails(
+      "Bank Transfer\nIBAN: GB29NWBK60161331926819\nSWIFT: NWBKGB2L",
+    );
+    expect(pd?.iban).toBeTruthy();
+    expect(pd?.swiftCode).toBeTruthy();
   });
 });
